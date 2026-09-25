@@ -1,9 +1,10 @@
 name: CI
 
-# Build and test every push and pull request, except ones that only touch docs.
+# Build and test pushes to main and all pull requests, except docs-only changes.
+# Other branches are covered by their pull request, so each change runs once.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     paths-ignore:
       - "**.md"
       - "docs/**"
