@@ -78,9 +78,18 @@ Cadence runs in the menu bar only (no Dock icon). It does three things:
 
 ## Installation
 
-Cadence is built from source. It isn't distributed as a signed download yet.
+### Homebrew
 
-### Requirements
+```sh
+brew install --cask hoshi-corp/cadence/cadence
+```
+
+Upgrade with `brew upgrade --cask cadence`. If a release isn't notarized, the cask clears the
+quarantine flag so Gatekeeper doesn't block the app.
+
+### From source
+
+#### Requirements
 
 - macOS 14 Sonoma or later
 - Xcode, with Xcode selected as the active developer directory and its license accepted:
@@ -93,7 +102,7 @@ Cadence is built from source. It isn't distributed as a signed download yet.
   brew install xcodegen
   ```
 
-### Build and install
+#### Build and install
 
 ```sh
 git clone https://github.com/Hoshi-Corp/cadence.git
