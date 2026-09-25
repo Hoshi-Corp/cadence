@@ -1,0 +1,15 @@
+// Default: ad-hoc signing. Needs no Apple account and is enough for v0.1.
+//
+// Once activity tracking (Accessibility permission) lands, use a stable
+// identity so macOS keeps the permission across rebuilds. Create
+// Config/Signing.local.xcconfig (git-ignored, per machine) with e.g.:
+//
+//   CADENCE_SIGN_IDENTITY = Apple Development
+//   CADENCE_TEAM = ABCDE12345
+//   CODE_SIGN_STYLE = Automatic
+
+CODE_SIGN_STYLE = Manual
+CADENCE_SIGN_IDENTITY = -
+CADENCE_TEAM =
+
+#include? "Signing.local.xcconfig"

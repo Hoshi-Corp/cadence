@@ -1,0 +1,65 @@
+name: Cadence
+
+options:
+  bundleIdPrefix: com.masaruhoshi
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  Cadence:
+    type: application
+    platform: macOS
+    sources: [Cadence]
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    info:
+      path: Cadence/Info.plist
+      properties:
+        CFBundleDisplayName: Cadence
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+    entitlements:
+      path: Cadence/Cadence.entitlements
+      properties:
+        # Unsandboxed on purpose: activity tracking (v0.3+) relies on the
+        # Accessibility API, which sandboxed apps cannot use.
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.masaruhoshi.cadence
+        CODE_SIGN_IDENTITY: $(CADENCE_SIGN_IDENTITY)
+        DEVELOPMENT_TEAM: $(CADENCE_TEAM)
+
+  CadenceTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [CadenceTests]
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    dependencies:
+      - target: Cadence
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: $(CADENCE_SIGN_IDENTITY)
+        DEVELOPMENT_TEAM: $(CADENCE_TEAM)
+
+schemes:
+  Cadence:
+    build:
+      targets:
+        Cadence: all
+        CadenceTests: [test]
+    test:
+      targets: [CadenceTests]
