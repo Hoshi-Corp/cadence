@@ -1,0 +1,46 @@
+name: CI
+
+# Build and test every push and pull request, except ones that only touch docs.
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest stable Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          echo "Using $xcode"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
