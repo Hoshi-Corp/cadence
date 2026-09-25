@@ -18,7 +18,7 @@ struct SettingsView: View {
     }
 }
 
-private struct GeneralSettingsView: View {
+struct GeneralSettingsView: View {
     @Environment(AppState.self) private var app
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var loginError: String?
@@ -95,7 +95,7 @@ private struct WeekdayPicker: View {
     }
 }
 
-private struct PomodoroSettingsView: View {
+struct PomodoroSettingsView: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
@@ -120,7 +120,7 @@ private struct PomodoroSettingsView: View {
     }
 }
 
-private struct RemindersSettingsView: View {
+struct RemindersSettingsView: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
@@ -142,7 +142,7 @@ private struct RemindersSettingsView: View {
     }
 }
 
-private struct WorkLogSettingsView: View {
+struct WorkLogSettingsView: View {
     @Environment(AppState.self) private var app
 
     var body: some View {

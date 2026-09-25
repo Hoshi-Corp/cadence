@@ -21,11 +21,11 @@ final class AppState {
     @ObservationIgnored private var reminderTimer: Timer?
     @ObservationIgnored private var workspaceObservers: [NSObjectProtocol] = []
 
-    init(preferences: PreferencesStore = PreferencesStore()) {
+    init(preferences: PreferencesStore = PreferencesStore(), clock: @escaping () -> Date = Date.init) {
         self.preferences = preferences
-        let pomodoro = PomodoroEngine(config: { preferences.value.pomodoro })
+        let pomodoro = PomodoroEngine(config: { preferences.value.pomodoro }, clock: clock)
         self.pomodoro = pomodoro
-        self.reminders = ReminderScheduler(preferences: preferences, isFocusing: { pomodoro.isFocusing })
+        self.reminders = ReminderScheduler(preferences: preferences, isFocusing: { pomodoro.isFocusing }, clock: clock)
         self.workLog = WorkLogStore(preferences: preferences)
 
         pomodoro.onEvent = { [weak self] in self?.handle($0) }
