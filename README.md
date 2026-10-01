@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14+">
   <img src="https://img.shields.io/badge/Swift-6-orange" alt="Swift 6">
-  <img src="https://img.shields.io/badge/version-0.1.0-lightgrey" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.2.0-lightgrey" alt="Version 0.2.0">
 </p>
 
 ---
@@ -19,8 +19,9 @@
 Cadence runs in the menu bar only (no Dock icon). It does three things:
 
 1. **Focus**: a Pomodoro timer that tracks what you're working on.
-2. **Reminders**: nudges to stand up, drink water and stretch. Reminders that come due
-   during a focus session wait until your break.
+2. **Reminders**: nudges to stand up, drink water and stretch, plus any of your own, at an
+   interval, a set time or once. Reminders that come due during a focus session wait until
+   your break.
 3. **Work log**: everything you do lands in a daily Markdown file, in a folder you choose.
    The files work with any editor and with Obsidian.
 
@@ -37,15 +38,35 @@ Cadence runs in the menu bar only (no Dock icon). It does three things:
 | **Reminders** | **Work Log** |
 | <img src="docs/screenshots/settings-reminders.png" alt="Reminder settings"> | <img src="docs/screenshots/settings-work-log.png" alt="Work log settings"> |
 
+<p align="center">
+  <img src="docs/screenshots/timer-alert.png" width="420" alt="Timer alert window">
+</p>
+<p align="center"><em>The alert when a focus session ends</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/today.png" width="520" alt="The Today window">
+</p>
+<p align="center"><em>The Today window: fix or delete entries without opening the file</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/quick-log.png" width="460" alt="Quick log panel">
+</p>
+<p align="center"><em>The quick log panel, opened with ⌃⌥⌘L from any app</em></p>
+
 > The screenshots are rendered from the real SwiftUI views with demo data (`make screenshots`).
 > In these renders, switches that are on appear grey rather than blue.
 
-## Features (v0.1)
+## Features
 
 ### Pomodoro timer
 - Focus, short break and long break lengths you can configure, plus how many sessions
   come before a long break.
 - A live countdown in the menu bar while the timer runs.
+- **Timer alert**: when a focus session or break ends, a window appears in the middle of
+  the screen with a sound, and stays until you respond. From it you can start or skip the
+  break, mark held reminders done and log what you got done. It doesn't take keyboard
+  focus, so typing in another app can't press its buttons; click it to type. You can switch
+  back to notification banners in Settings → Pomodoro.
 - Type what you're working on before or during a session. When the session ends, Cadence
   asks *"What did you get done?"*. You can answer in the popover, or type straight into
   the notification.
@@ -56,16 +77,33 @@ Cadence runs in the menu bar only (no Dock icon). It does three things:
 
 ### Reminders
 - **🧍 Stand up** every 45 min, **💧 Drink water** every 60 min, **🤸 Stretch** every
-  90 min. You can change each interval or turn each reminder off.
-- **Active hours and days**: reminders only fire during your working hours (default:
-  Mon–Fri, 9:00–18:00).
+  90 min. You can edit each one or turn it off.
+- **Custom reminders** with a name, emoji and message, on one of three schedules:
+  - **Repeat every few minutes**, during active hours.
+  - **At a set time** on the days you choose, e.g. *🥗 Lunch, weekdays at 12:30*.
+  - **Once**, at a date and time. It turns itself off after it fires.
+- **Active hours and days**: repeating reminders only fire during your working hours
+  (default: Mon–Fri, 9:00–18:00). Set-time and one-off reminders fire at their time.
 - **Held during focus**: reminders that come due mid-session are delivered together in the
   notification that ends the session. You can turn this off.
 - Notification actions: **Done** (counted and optionally logged) and **Snooze 10 min**.
-- Interval timers restart when your Mac wakes from sleep.
+- Repeating reminders start over when your Mac wakes from sleep. A set-time reminder
+  missed while the Mac slept is shown on wake if it's still the same day.
+
+### Away detection
+- After 5 minutes (configurable) without keyboard or mouse input, Cadence treats you as
+  away. Repeating reminders don't fire while you're away, and start over when you're back,
+  since you've already had your break.
+- Optionally logs the time away, e.g. `- **12:30–13:10** 💤 Away`.
+- Uses the system idle time, so no permission is needed.
 
 ### Work log
 - **Quick log** field in the popover: type, press ⏎, and it's saved with a timestamp.
+- **Global shortcut** (default ⌃⌥⌘L, configurable): opens a small quick log field over
+  any app, without switching away from it. No permission needed.
+- **Today** window: browse the day's entries (and earlier days), edit an entry's time or
+  text, or delete it. The Summary counters follow, so deleting a 🍅 line removes that
+  Pomodoro from the day's focus time.
 - Finished focus sessions and completed reminders are logged automatically.
 - One Markdown file per day (`yyyy-MM-dd.md`) in a folder you pick.
 - A **Summary** table (focus time, Pomodoros, reminders completed) is kept up to date.
@@ -73,6 +111,8 @@ Cadence runs in the menu bar only (no Dock icon). It does three things:
 
 ### General
 - Launch at login.
+- **Export and import settings** as a JSON file to set up another Mac the same way.
+  Importing keeps this Mac's log folder unless you choose to take the one in the file.
 - Unsandboxed, so the log folder can be anywhere: `~/Documents`, iCloud Drive, Dropbox,
   or an Obsidian vault.
 
@@ -121,19 +161,24 @@ To update later, run `git pull && make install`.
 Every Mac has its own settings, so you can point your work Mac and your personal Mac at
 different log folders. If both Macs write into the **same** synced folder, they will write
 to the same daily file and your sync service may create conflicted copies. Use separate
-folders for now. A per-machine filename option is on the [roadmap](#roadmap).
+folders for now. To give both Macs the same reminders and timer settings, use
+**Settings → General → Export…** on one and **Import…** on the other. A per-machine filename option is on the [roadmap](#roadmap).
 
 ## Usage
 
 1. Click the menu bar icon, type what you're working on, and press **Start**.
-2. When the session ends, you get a notification with any reminders that were held.
-   Describe what you got done in the notification or in the popover.
+2. When the session ends, an alert appears in the middle of the screen with any reminders
+   that were held. Describe what you got done there or in the popover.
 3. During breaks, act on the reminders and click **Done** so they're counted.
-4. Anytime: type in **Quick log** to record meetings, decisions or anything else.
-5. Click **Open today's log** to open the file in your default Markdown app.
+4. Anytime: type in **Quick log**, or press **⌃⌥⌘L** in any app, to record meetings,
+   decisions or anything else.
+5. Click **Today** to review the day's entries and fix or delete any of them, or
+   **Open log file** to open the Markdown file in your default editor.
 
 Settings (⚙ in the popover) has four tabs: **General** (launch at login, active hours,
-holding reminders during focus), **Pomodoro**, **Reminders** and **Work Log** (folder).
+holding reminders during focus, away detection, settings export and import),
+**Pomodoro**, **Reminders** (edit, add and delete reminders) and **Work Log** (folder,
+quick log shortcut).
 
 ## Work log format
 
@@ -173,7 +218,8 @@ How Cadence writes to the file:
 
 - The `<!-- cadence:… -->` markers are HTML comments. They don't show when the Markdown is
   rendered, including in Obsidian's reading view.
-- **Timeline** entries are only ever *appended*. You can edit existing lines freely.
+- **Timeline** entries are only ever *appended*, except when you edit or delete one in
+  the Today window. You can edit existing lines freely in any editor.
   If you edit a focus session's line before its outcome arrives, the outcome is added as
   a separate `↳` line instead.
 - **Summary** is rewritten on every update from Cadence's own counters.
@@ -189,7 +235,7 @@ How Cadence writes to the file:
 |---|---|
 | Daily work logs | The folder chosen in Settings → Work Log (default `~/Documents/Cadence`) |
 | Summary counters | `~/Library/Application Support/Cadence/stats/yyyy-MM-dd.json` |
-| Preferences | `UserDefaults` domain `com.masaruhoshi.cadence` |
+| Preferences | `UserDefaults` domain `com.masaruhoshi.cadence` (export with Settings → General → Export…) |
 
 Cadence makes no network requests. Your data stays on your Mac and in whatever folder you
 point it at.
@@ -199,8 +245,8 @@ point it at.
 | Version | Status | Scope |
 |---|---|---|
 | **v0.1** | ✅ Released | Menu bar app, Pomodoro timer, three wellness reminders held during focus, quick log, daily Markdown file with marker-based sections, folder picker, launch at login |
-| **v0.2** | ⏳ Next | Custom reminders (interval, fixed time, one-off), global hotkey for quick log, **Today** view to edit and delete entries, idle detection (resets reminders after you've been away), export and import of settings |
-| **v0.3** | Planned | Automatic activity tracking, level 1 (frontmost app, no permission needed), merging of activity into segments, **Activity Review** window to rename, merge, split or exclude segments, rules that map apps or window titles to tasks |
+| **v0.2** | ✅ Released | Custom reminders (interval, fixed time, one-off), global hotkey for quick log, **Today** view to edit and delete entries, idle detection (resets reminders after you've been away), export and import of settings |
+| **v0.3** | ⏳ Next | Automatic activity tracking, level 1 (frontmost app, no permission needed), merging of activity into segments, **Activity Review** window to rename, merge, split or exclude segments, rules that map apps or window titles to tasks |
 | **v0.4** | Planned | Activity tracking levels 2–3 (window titles via Accessibility, browser tabs via Automation), private segments, ignore list |
 | **v0.5** | Planned | Obsidian options (YAML front matter / Properties, `[[project]]` links, "Open in Obsidian"), end-of-day summary prompt, machine name in filenames for shared folders |
 | **v1.0** | Planned | Polish, onboarding, sounds, optional Developer ID signing and a notarized DMG, auto-update |
@@ -243,11 +289,11 @@ plugins and don't affect this Mac-only project.
 Cadence/
   App/          entry point; AppState connects all the parts
   Pomodoro/     PomodoroEngine state machine
-  Reminders/    Reminder model; ReminderScheduler (holds reminders during focus)
-  WorkLog/      Markdown document operations, entries, daily stats, file store
-  Preferences/  Codable preferences saved to UserDefaults
-  System/       notifications, launch at login
-  UI/           menu bar popover and Settings window
+  Reminders/    Reminder model and schedules; ReminderScheduler (holds reminders during focus)
+  WorkLog/      Markdown document operations, entries, timeline items, daily stats, file store
+  Preferences/  Codable preferences saved to UserDefaults; settings file export/import
+  System/       notifications, launch at login, global hotkey, idle detection
+  UI/           menu bar popover, quick log panel, Today window and Settings window
   Assets.xcassets/  app icon (generated by `make icons`)
 CadenceTests/   unit tests and the screenshot renderer
 Config/         signing configuration

@@ -25,7 +25,14 @@ struct MenuBarView: View {
 
             Divider()
             HStack {
-                Button("Open today's log") { app.openTodaysLog() }
+                Button {
+                    app.showToday()
+                } label: {
+                    Label("Today", systemImage: "list.bullet.rectangle")
+                }
+                .help("Review and edit today's entries")
+                Button("Open log file") { app.openTodaysLog() }
+                    .help("Open today's Markdown file")
                 Spacer()
                 Button {
                     NSApp.activate()
@@ -39,7 +46,7 @@ struct MenuBarView: View {
                 } label: {
                     Image(systemName: "power")
                 }
-                .help("Quit Cadence")
+                .help("Quit Cadence \(AppState.versionDescription)")
             }
             .buttonStyle(.borderless)
         }
@@ -146,7 +153,7 @@ private struct RemindersSection: View {
                 .foregroundStyle(.secondary)
 
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                let upcoming = app.reminders.upcoming
+                let upcoming = Array(app.reminders.upcoming.prefix(5))
                 if upcoming.isEmpty {
                     Text("No reminders enabled").foregroundStyle(.secondary)
                 } else {
@@ -173,7 +180,14 @@ private struct RemindersSection: View {
     private func status(of reminder: Reminder, due: Date, now: Date) -> String {
         if app.reminders.held.contains(reminder.id) { return "held until break" }
         let minutes = max(0, Int((due.timeIntervalSince(now) / 60).rounded(.up)))
-        return minutes == 0 ? "now" : "in \(minutes) min"
+        if minutes == 0 { return "now" }
+        if minutes < 60 { return "in \(minutes) min" }
+        let calendar = Calendar.current
+        if calendar.isDate(due, inSameDayAs: now) { return "at \(LogEntry.time(due))" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(due, inSameDayAs: tomorrow) {
+            return "tomorrow \(LogEntry.time(due))"
+        }
+        return due.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
     }
 }
 
@@ -184,7 +198,7 @@ private struct QuickLogSection: View {
 
     var body: some View {
         HStack {
-            TextField("Quick log… (⏎ to save)", text: $text)
+            TextField(placeholder, text: $text)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(save)
             if justSaved {
@@ -193,6 +207,13 @@ private struct QuickLogSection: View {
                     .transition(.opacity)
             }
         }
+    }
+
+    private var placeholder: String {
+        let prefs = app.preferences.value
+        return prefs.quickLogHotKeyEnabled
+            ? "Quick log… (⏎ to save, \(prefs.quickLogHotKey.displayString) anywhere)"
+            : "Quick log… (⏎ to save)"
     }
 
     private func save() {

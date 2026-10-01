@@ -29,12 +29,25 @@ struct ActiveHours: Codable, Equatable {
     }
 }
 
+/// Detects time away from the Mac from the absence of keyboard and mouse input.
+struct IdleConfig: Codable, Equatable {
+    var isEnabled = true
+    var thresholdMinutes = 5
+    /// Adds a "💤 Away" line to the work log when the user comes back.
+    var logAwayTime = false
+}
+
 struct Preferences: Codable, Equatable {
     var pomodoro = PomodoroConfig()
     var activeHours = ActiveHours()
     var holdRemindersDuringFocus = true
+    /// Shows a window in the middle of the screen when a focus session or break ends.
+    var showTimerAlert = true
     var reminders = Reminder.builtIns
     var logFolderPath = Preferences.defaultLogFolderPath
+    var idle = IdleConfig()
+    var quickLogHotKeyEnabled = true
+    var quickLogHotKey = HotKey.defaultQuickLog
 
     static var defaultLogFolderPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -52,11 +65,43 @@ struct Preferences: Codable, Equatable {
         activeHours = try c.decodeIfPresent(ActiveHours.self, forKey: .activeHours) ?? defaults.activeHours
         holdRemindersDuringFocus = try c.decodeIfPresent(Bool.self, forKey: .holdRemindersDuringFocus)
             ?? defaults.holdRemindersDuringFocus
+        showTimerAlert = try c.decodeIfPresent(Bool.self, forKey: .showTimerAlert) ?? defaults.showTimerAlert
         reminders = try c.decodeIfPresent([Reminder].self, forKey: .reminders) ?? defaults.reminders
         logFolderPath = try c.decodeIfPresent(String.self, forKey: .logFolderPath) ?? defaults.logFolderPath
+        idle = try c.decodeIfPresent(IdleConfig.self, forKey: .idle) ?? defaults.idle
+        quickLogHotKeyEnabled = try c.decodeIfPresent(Bool.self, forKey: .quickLogHotKeyEnabled)
+            ?? defaults.quickLogHotKeyEnabled
+        quickLogHotKey = try c.decodeIfPresent(HotKey.self, forKey: .quickLogHotKey) ?? defaults.quickLogHotKey
     }
 
     private enum CodingKeys: String, CodingKey {
         case pomodoro, activeHours, holdRemindersDuringFocus, reminders, logFolderPath
+        case idle, quickLogHotKeyEnabled, quickLogHotKey, showTimerAlert
+    }
+
+    /// Clamps values that would make timers misbehave, for settings that come
+    /// from outside the app (an imported file).
+    func sanitized() -> Preferences {
+        var result = self
+        result.pomodoro.focusMinutes = max(1, pomodoro.focusMinutes)
+        result.pomodoro.shortBreakMinutes = max(1, pomodoro.shortBreakMinutes)
+        result.pomodoro.longBreakMinutes = max(1, pomodoro.longBreakMinutes)
+        result.pomodoro.sessionsBeforeLongBreak = max(1, pomodoro.sessionsBeforeLongBreak)
+        result.activeHours.startMinute = min(max(0, activeHours.startMinute), 24 * 60)
+        result.activeHours.endMinute = min(max(0, activeHours.endMinute), 24 * 60)
+        result.idle.thresholdMinutes = max(1, idle.thresholdMinutes)
+        for index in result.reminders.indices {
+            switch result.reminders[index].schedule {
+            case .interval(let minutes):
+                result.reminders[index].schedule = .interval(minutes: max(1, minutes))
+            case let .daily(minuteOfDay, weekdays):
+                result.reminders[index].schedule = .daily(
+                    minuteOfDay: min(max(0, minuteOfDay), 24 * 60 - 1), weekdays: weekdays
+                )
+            case .once:
+                break
+            }
+        }
+        return result
     }
 }

@@ -5,6 +5,7 @@ struct LogEntry: Equatable {
         case note
         case pomodoro(end: Date)
         case reminder(emoji: String)
+        case away(end: Date)
     }
 
     var date: Date
@@ -24,6 +25,8 @@ struct LogEntry: Equatable {
             let task = text.isEmpty ? "Focus session" : text
             let outcome = outcome.map(Self.singleLine).flatMap { $0.isEmpty ? nil : " — *\($0)*" } ?? ""
             return "- **\(time)–\(Self.time(end))** 🍅 \(task)\(outcome)"
+        case .away(let end):
+            return "- **\(time)–\(Self.time(end))** 💤 \(text.isEmpty ? "Away" : text)"
         }
     }
 

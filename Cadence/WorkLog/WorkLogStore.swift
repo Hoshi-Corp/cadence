@@ -5,6 +5,8 @@ import Observation
 @MainActor @Observable
 final class WorkLogStore {
     private(set) var lastError: String?
+    /// Goes up after every write, so views showing the file know to reload.
+    private(set) var revision = 0
 
     @ObservationIgnored private let preferences: PreferencesStore
     @ObservationIgnored private let stats: StatsStore
@@ -64,13 +66,46 @@ final class WorkLogStore {
         }
     }
 
+    func addAway(from start: Date, to end: Date) {
+        let entry = LogEntry(date: start, kind: .away(end: end), text: "Away")
+        write(for: start) { WorkLogDocument.appendingTimelineLine(entry.markdown, to: $0) }
+    }
+
+    // MARK: Reading and editing a day
+
+    func timeline(for date: Date) -> [TimelineItem] {
+        guard let text = try? String(contentsOf: fileURL(for: date), encoding: .utf8) else { return [] }
+        return WorkLogDocument.timelineItems(in: text)
+    }
+
+    func dayStats(for date: Date) -> DayStats {
+        stats.load(for: date)
+    }
+
+    /// Replaces a timeline line, or deletes it when `newLine` is nil, and adjusts
+    /// the Summary counters to match. Returns false if the line changed in the
+    /// file since it was read (or the write failed; see `lastError`).
+    @discardableResult
+    func replace(_ item: TimelineItem, with newLine: String?, on date: Date) -> Bool {
+        let reminders = preferences.value.reminders
+        let replacement = newLine.map { TimelineItem(index: item.index, line: $0) }
+        return write(for: date, updatingStats: { stats in
+            stats.account(for: item, reminders: reminders, sign: -1)
+            if let replacement { stats.account(for: replacement, reminders: reminders, sign: 1) }
+        }) { text in
+            WorkLogDocument.replacingTimelineItem(at: item.index, expected: item.line, with: newLine, in: text)
+        }
+    }
+
+    /// Applies `transform` to the day's file and refreshes its Summary.
+    /// A nil result from `transform` cancels the write, leaving file and counters as they were.
+    @discardableResult
     private func write(
         for date: Date,
         updatingStats change: (inout DayStats) -> Void = { _ in },
-        _ transform: (String) -> String
-    ) {
+        _ transform: (String) -> String?
+    ) -> Bool {
         do {
-            let dayStats = try stats.update(for: date, change)
             try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
 
             let url = fileURL(for: date)
@@ -79,14 +114,18 @@ final class WorkLogStore {
                 ? try String(contentsOf: url, encoding: .utf8)
                 : WorkLogDocument.newDocument(for: date)
 
-            var text = transform(existing)
+            guard var text = transform(existing) else { return false }
+            let dayStats = try stats.update(for: date, change)
             let summary = dayStats.summaryMarkdown(reminders: preferences.value.reminders)
             text = WorkLogDocument.replacingBlock(.summary, content: summary, in: text)
 
             try text.write(to: url, atomically: true, encoding: .utf8)
             lastError = nil
+            revision += 1
+            return true
         } catch {
             lastError = "Couldn't write work log: \(error.localizedDescription)"
+            return false
         }
     }
 }

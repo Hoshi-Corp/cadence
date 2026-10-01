@@ -6,8 +6,15 @@ import Observation
 @MainActor @Observable
 final class PreferencesStore {
     var value: Preferences {
-        didSet { if value != oldValue { save() } }
+        didSet {
+            guard value != oldValue else { return }
+            save()
+            onChange?(oldValue, value)
+        }
     }
+
+    /// Called after every change with the old and new value.
+    @ObservationIgnored var onChange: ((Preferences, Preferences) -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
     private static let key = "preferences.v1"

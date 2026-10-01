@@ -85,7 +85,46 @@ enum WorkLogDocument {
         return result
     }
 
+    /// The list lines (`- …`) in the timeline block, in file order.
+    static func timelineItems(in text: String) -> [TimelineItem] {
+        itemRanges(in: text).enumerated().map { TimelineItem(index: $0.offset, line: String(text[$0.element])) }
+    }
+
+    /// Replaces the timeline item at `index`, or removes it when `new` is nil.
+    /// Returns nil if that item no longer reads `expected`, which means the
+    /// file changed since it was loaded.
+    static func replacingTimelineItem(at index: Int, expected: String, with new: String?, in text: String) -> String? {
+        let ranges = itemRanges(in: text)
+        guard ranges.indices.contains(index), text[ranges[index]] == expected else { return nil }
+        var result = text
+        let range = ranges[index]
+        if let new {
+            result.replaceSubrange(range, with: new)
+        } else {
+            // Take the line break with it so no blank line is left behind.
+            let end = range.upperBound < text.endIndex && text[range.upperBound] == "\n"
+                ? text.index(after: range.upperBound) : range.upperBound
+            result.removeSubrange(range.lowerBound..<end)
+        }
+        return result
+    }
+
     // MARK: Helpers
+
+    /// Ranges of the list lines inside the timeline block, without line breaks.
+    private static func itemRanges(in text: String) -> [Range<String.Index>] {
+        guard let inner = innerRange(of: .timeline, in: text) else { return [] }
+        var ranges: [Range<String.Index>] = []
+        var lineStart = inner.lowerBound
+        while lineStart < inner.upperBound {
+            let lineEnd = text[lineStart..<inner.upperBound].firstIndex(of: "\n") ?? inner.upperBound
+            if text[lineStart..<lineEnd].hasPrefix("- ") {
+                ranges.append(lineStart..<lineEnd)
+            }
+            lineStart = lineEnd < inner.upperBound ? text.index(after: lineEnd) : inner.upperBound
+        }
+        return ranges
+    }
 
     /// Range between the end of the start marker and the start of the end marker.
     private static func innerRange(of block: Block, in text: String) -> Range<String.Index>? {

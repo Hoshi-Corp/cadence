@@ -1,8 +1,12 @@
 import Foundation
 import Observation
 
-/// Tracks when each interval reminder is next due. Reminders that come due
-/// during a focus session are held and handed over when the break starts.
+/// Tracks when each reminder is next due. Reminders that come due during a
+/// focus session are held and handed over when the break starts.
+///
+/// Interval reminders only fire during active hours and not while the user is
+/// away. Fixed-time and one-off reminders were set for a specific moment, so
+/// they always fire; a one-off turns itself off once it has.
 @MainActor @Observable
 final class ReminderScheduler {
     private(set) var nextFire: [Reminder.ID: Date] = [:]
@@ -11,15 +15,25 @@ final class ReminderScheduler {
     /// Called for each reminder that should be shown right now.
     @ObservationIgnored var onDue: ((Reminder) -> Void)?
 
-    @ObservationIgnored private var scheduledInterval: [Reminder.ID: Int] = [:]
+    @ObservationIgnored private var scheduled: [Reminder.ID: Reminder.Schedule] = [:]
     @ObservationIgnored private let preferences: PreferencesStore
     @ObservationIgnored private let isFocusing: () -> Bool
+    @ObservationIgnored private let isAway: () -> Bool
     @ObservationIgnored private let clock: () -> Date
+    @ObservationIgnored private let calendar: Calendar
 
-    init(preferences: PreferencesStore, isFocusing: @escaping () -> Bool, clock: @escaping () -> Date = Date.init) {
+    init(
+        preferences: PreferencesStore,
+        isFocusing: @escaping () -> Bool,
+        isAway: @escaping () -> Bool = { false },
+        clock: @escaping () -> Date = Date.init,
+        calendar: Calendar = .current
+    ) {
         self.preferences = preferences
         self.isFocusing = isFocusing
+        self.isAway = isAway
         self.clock = clock
+        self.calendar = calendar
     }
 
     private var shouldHold: Bool {
@@ -33,25 +47,38 @@ final class ReminderScheduler {
         let enabledIDs = Set(enabled.map(\.id))
 
         nextFire = nextFire.filter { enabledIDs.contains($0.key) }
-        held.removeAll { !enabledIDs.contains($0) }
+        scheduled = scheduled.filter { enabledIDs.contains($0.key) }
+        // A one-off turns itself off when it fires, but stays held until delivered.
+        held.removeAll { id in
+            !prefs.reminders.contains { $0.id == id && ($0.isEnabled || $0.schedule.isOnce) }
+        }
 
         // Focus ended without a break (reset or paused): deliver what we held.
-        if !held.isEmpty && !shouldHold {
+        if !held.isEmpty && !shouldHold && !isAway() {
             takeHeld().forEach { onDue?($0) }
         }
 
         for reminder in enabled {
-            let interval = TimeInterval(reminder.intervalMinutes * 60)
-            guard scheduledInterval[reminder.id] == reminder.intervalMinutes,
-                  let due = nextFire[reminder.id] else {
-                scheduledInterval[reminder.id] = reminder.intervalMinutes
-                nextFire[reminder.id] = now + interval
+            guard scheduled[reminder.id] == reminder.schedule, let due = nextFire[reminder.id] else {
+                scheduled[reminder.id] = reminder.schedule
+                nextFire[reminder.id] = reminder.schedule.nextOccurrence(after: now, calendar: calendar)
                 continue
             }
             guard now >= due else { continue }
 
-            nextFire[reminder.id] = now + interval
-            guard prefs.activeHours.contains(now) else { continue }
+            switch reminder.schedule {
+            case .interval:
+                nextFire[reminder.id] = reminder.schedule.nextOccurrence(after: now, calendar: calendar)
+                guard prefs.activeHours.contains(now, calendar: calendar), !isAway() else { continue }
+            case .daily:
+                nextFire[reminder.id] = reminder.schedule.nextOccurrence(after: now, calendar: calendar)
+                // Missed while the Mac slept: still worth showing today, not tomorrow.
+                guard calendar.isDate(due, inSameDayAs: now) else { continue }
+            case .once:
+                nextFire[reminder.id] = nil
+                scheduled[reminder.id] = nil
+                setEnabled(false, for: reminder.id)
+            }
 
             if shouldHold {
                 if !held.contains(reminder.id) { held.append(reminder.id) }
@@ -70,13 +97,26 @@ final class ReminderScheduler {
     }
 
     func snooze(_ id: Reminder.ID, minutes: Int) {
-        nextFire[id] = clock() + TimeInterval(minutes * 60)
+        let date = clock() + TimeInterval(minutes * 60)
+        // A one-off has already turned itself off, so move it and turn it back on.
+        if let index = preferences.value.reminders.firstIndex(where: { $0.id == id }),
+           preferences.value.reminders[index].schedule.isOnce {
+            preferences.value.reminders[index].schedule = .once(date)
+            preferences.value.reminders[index].isEnabled = true
+            scheduled[id] = .once(date)
+        }
+        nextFire[id] = date
     }
 
-    /// Starts every interval over, e.g. after the Mac wakes from sleep.
-    func restartAll() {
-        nextFire = [:]
-        scheduledInterval = [:]
+    /// Starts every interval reminder over, e.g. after the Mac wakes from sleep
+    /// or the user comes back. Fixed-time and one-off reminders keep their time.
+    func restartIntervals() {
+        for reminder in preferences.value.reminders {
+            if case .interval = reminder.schedule {
+                nextFire[reminder.id] = nil
+                scheduled[reminder.id] = nil
+            }
+        }
         tick()
     }
 
@@ -84,5 +124,10 @@ final class ReminderScheduler {
         preferences.value.reminders
             .compactMap { reminder in nextFire[reminder.id].map { (reminder, $0) } }
             .sorted { $0.date < $1.date }
+    }
+
+    private func setEnabled(_ enabled: Bool, for id: Reminder.ID) {
+        guard let index = preferences.value.reminders.firstIndex(where: { $0.id == id }) else { return }
+        preferences.value.reminders[index].isEnabled = enabled
     }
 }
