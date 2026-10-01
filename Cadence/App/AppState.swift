@@ -7,6 +7,12 @@ struct PendingOutcome: Equatable {
     var task: String
 }
 
+/// What the timer alert window is showing.
+enum TimerAlert: Equatable {
+    case focusEnded(task: String, nextBreak: PomodoroEngine.Phase, breakMinutes: Int, held: [Reminder])
+    case breakEnded
+}
+
 /// Wires the timer, reminders, notifications and work log together.
 @MainActor @Observable
 final class AppState {
@@ -14,31 +20,62 @@ final class AppState {
     let pomodoro: PomodoroEngine
     let reminders: ReminderScheduler
     let workLog: WorkLogStore
+    let idle: IdleMonitor
     @ObservationIgnored let notifications = NotificationService()
 
     private(set) var pendingOutcome: PendingOutcome?
+    /// Set while the timer alert window is up.
+    private(set) var timerAlert: TimerAlert?
+    /// Why the quick log shortcut couldn't be registered, if it couldn't.
+    private(set) var hotKeyError: String?
 
     @ObservationIgnored private var reminderTimer: Timer?
     @ObservationIgnored private var workspaceObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var isRecordingHotKey = false
+    @ObservationIgnored private var quickLogPanel: QuickLogPanelController?
+    @ObservationIgnored private var todayWindow: TodayWindowController?
+    @ObservationIgnored private var timerAlertWindow: TimerAlertController?
 
-    init(preferences: PreferencesStore = PreferencesStore(), clock: @escaping () -> Date = Date.init) {
+    init(
+        preferences: PreferencesStore = PreferencesStore(),
+        stats: StatsStore = StatsStore(),
+        idleSeconds: @escaping () -> TimeInterval = IdleMonitor.systemIdleSeconds,
+        clock: @escaping () -> Date = Date.init
+    ) {
         self.preferences = preferences
         let pomodoro = PomodoroEngine(config: { preferences.value.pomodoro }, clock: clock)
         self.pomodoro = pomodoro
-        self.reminders = ReminderScheduler(preferences: preferences, isFocusing: { pomodoro.isFocusing }, clock: clock)
-        self.workLog = WorkLogStore(preferences: preferences)
+        let idle = IdleMonitor(preferences: preferences, idleSeconds: idleSeconds, clock: clock)
+        self.idle = idle
+        self.reminders = ReminderScheduler(
+            preferences: preferences, isFocusing: { pomodoro.isFocusing }, isAway: { idle.isAway }, clock: clock
+        )
+        self.workLog = WorkLogStore(preferences: preferences, stats: stats)
 
         pomodoro.onEvent = { [weak self] in self?.handle($0) }
         reminders.onDue = { [weak self] in self?.notifications.postReminder($0) }
         notifications.onAction = { [weak self] in self?.handle($0) }
+        idle.onReturn = { [weak self] in self?.userReturned(from: $0, to: $1) }
     }
 
     func start() {
+        timerAlertWindow = TimerAlertController(app: self)
         notifications.configure()
         reminders.tick()
 
+        HotKeyCenter.shared.onPress = { [weak self] in self?.showQuickLogPanel() }
+        applyHotKey()
+        preferences.onChange = { [weak self] old, new in
+            if old.quickLogHotKey != new.quickLogHotKey || old.quickLogHotKeyEnabled != new.quickLogHotKeyEnabled {
+                self?.applyHotKey()
+            }
+        }
+
         let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reminders.tick() }
+            MainActor.assumeIsolated {
+                self?.idle.tick()
+                self?.reminders.tick()
+            }
         }
         timer.tolerance = 5
         RunLoop.main.add(timer, forMode: .common)
@@ -50,7 +87,7 @@ final class AppState {
                 MainActor.assumeIsolated { self?.systemWillSleep() }
             },
             center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reminders.restartAll() }
+                MainActor.assumeIsolated { self?.reminders.restartIntervals() }
             },
         ]
     }
@@ -71,6 +108,22 @@ final class AppState {
         pendingOutcome = nil
     }
 
+    func dismissTimerAlert() {
+        setTimerAlert(nil)
+    }
+
+    /// Marks the reminders held during focus as done, from the timer alert.
+    func markHeldRemindersDone() {
+        guard case let .focusEnded(task, nextBreak, breakMinutes, held) = timerAlert else { return }
+        held.forEach { workLog.markReminderDone($0) }
+        setTimerAlert(.focusEnded(task: task, nextBreak: nextBreak, breakMinutes: breakMinutes, held: []))
+    }
+
+    private func setTimerAlert(_ alert: TimerAlert?) {
+        timerAlert = alert
+        timerAlertWindow?.update(showing: alert != nil)
+    }
+
     func openTodaysLog() {
         let url = workLog.fileURL(for: Date())
         if FileManager.default.fileExists(atPath: url.path) {
@@ -79,6 +132,59 @@ final class AppState {
             try? FileManager.default.createDirectory(at: workLog.folderURL, withIntermediateDirectories: true)
             NSWorkspace.shared.open(workLog.folderURL)
         }
+    }
+
+    func showQuickLogPanel() {
+        if quickLogPanel == nil {
+            quickLogPanel = QuickLogPanelController { [weak self] in self?.quickLog($0) }
+        }
+        quickLogPanel?.toggle()
+    }
+
+    func showToday() {
+        if todayWindow == nil { todayWindow = TodayWindowController(app: self) }
+        todayWindow?.show()
+    }
+
+    // MARK: Settings
+
+    /// Turns the global shortcut off while a new one is being recorded, so
+    /// pressing the current shortcut records it instead of opening the panel.
+    func setRecordingHotKey(_ recording: Bool) {
+        isRecordingHotKey = recording
+        applyHotKey()
+    }
+
+    private func applyHotKey() {
+        let prefs = preferences.value
+        let hotKey = prefs.quickLogHotKeyEnabled && !isRecordingHotKey ? prefs.quickLogHotKey : nil
+        do {
+            try HotKeyCenter.shared.register(hotKey)
+            hotKeyError = nil
+        } catch {
+            hotKeyError = error.localizedDescription
+        }
+    }
+
+    static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    }
+
+    /// e.g. "0.2.0 (42)", with the build number from the release workflow.
+    static var versionDescription: String {
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        return "\(appVersion) (\(build))"
+    }
+
+    func exportSettings() throws -> Data {
+        try SettingsFile.encode(preferences.value, appVersion: Self.appVersion)
+    }
+
+    func importSettings(_ contents: SettingsFile.Contents, includingLogFolder: Bool) {
+        preferences.value = SettingsFile.applying(
+            contents.preferences, to: preferences.value, includingLogFolder: includingLogFolder
+        )
+        reminders.tick()
     }
 
     // MARK: Events
@@ -92,10 +198,20 @@ final class AppState {
                 pendingOutcome = PendingOutcome(entry: entry, task: session.task)
             }
             let breakMinutes = Int(pomodoro.duration(of: nextBreak) / 60)
-            notifications.postFocusEnded(session: session, nextBreak: nextBreak, breakMinutes: breakMinutes, held: held)
+            // A skipped session means the user is right here, so a notification is enough.
+            if let session, preferences.value.showTimerAlert {
+                setTimerAlert(.focusEnded(task: session.task, nextBreak: nextBreak, breakMinutes: breakMinutes, held: held))
+            } else {
+                notifications.postFocusEnded(session: session, nextBreak: nextBreak, breakMinutes: breakMinutes, held: held)
+            }
 
         case .breakEnded(let skipped):
-            if !skipped { notifications.postBreakEnded() }
+            guard !skipped else { return }
+            if preferences.value.showTimerAlert {
+                setTimerAlert(.breakEnded)
+            } else {
+                notifications.postBreakEnded()
+            }
         }
     }
 
@@ -116,5 +232,13 @@ final class AppState {
 
     private func systemWillSleep() {
         if pomodoro.isFocusing { pomodoro.pause() }
+    }
+
+    /// Being away counts as a break from the desk, so interval reminders start over.
+    private func userReturned(from start: Date, to end: Date) {
+        reminders.restartIntervals()
+        if preferences.value.idle.logAwayTime {
+            workLog.addAway(from: start, to: end)
+        }
     }
 }

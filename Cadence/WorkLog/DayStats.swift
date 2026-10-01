@@ -28,6 +28,21 @@ struct DayStats: Codable, Equatable {
         """
     }
 
+    /// Adjusts the counters for a timeline item added (`sign` 1) or removed
+    /// (`sign` -1) by hand, so the Summary follows edits made in the Today view.
+    /// Counts a 🍅 line with a time range as a Pomodoro and a line reading
+    /// exactly like a reminder's label as that reminder done.
+    mutating func account(for item: TimelineItem, reminders: [Reminder], sign: Int) {
+        if item.text.hasPrefix("🍅"), let duration = item.duration {
+            pomodoros = max(0, pomodoros + sign)
+            focusSeconds = max(0, focusSeconds + Double(sign) * duration)
+        } else if let reminder = reminders.first(where: { $0.label == item.text }) {
+            let key = reminder.id.uuidString
+            let count = max(0, reminderCounts[key, default: 0] + sign)
+            reminderCounts[key] = count == 0 ? nil : count
+        }
+    }
+
     static func duration(_ seconds: TimeInterval) -> String {
         let minutes = Int((seconds / 60).rounded())
         return minutes >= 60 ? "\(minutes / 60)h \(String(format: "%02d", minutes % 60))m" : "\(minutes)m"
