@@ -7,7 +7,7 @@ import Foundation
 /// user writes outside the markers is preserved as-is.
 enum WorkLogDocument {
     enum Block: String {
-        case timeline, summary
+        case timeline, summary, activity
 
         var startMarker: String { "<!-- cadence:\(rawValue):start -->" }
         var endMarker: String { "<!-- cadence:\(rawValue):end -->" }
@@ -15,6 +15,7 @@ enum WorkLogDocument {
             switch self {
             case .timeline: "## Timeline"
             case .summary: "## Summary"
+            case .activity: "## Activity"
             }
         }
     }
@@ -49,7 +50,8 @@ enum WorkLogDocument {
         } else {
             // Keep list items contiguous; leave a blank line after a heading or paragraph.
             let lastLine = existing.split(separator: "\n").last ?? ""
-            body = existing + (lastLine.hasPrefix("- ") ? "\n" : "\n\n") + line
+            let endsInList = lastLine.hasPrefix("- ") || lastLine.first?.isWhitespace == true
+            body = existing + (endsInList ? "\n" : "\n\n") + line
         }
 
         var result = text
@@ -111,15 +113,20 @@ enum WorkLogDocument {
 
     // MARK: Helpers
 
-    /// Ranges of the list lines inside the timeline block, without line breaks.
+    /// Ranges of the list items inside the timeline block, without the final
+    /// line break. An item takes in the indented lines that follow it.
     private static func itemRanges(in text: String) -> [Range<String.Index>] {
         guard let inner = innerRange(of: .timeline, in: text) else { return [] }
         var ranges: [Range<String.Index>] = []
         var lineStart = inner.lowerBound
         while lineStart < inner.upperBound {
             let lineEnd = text[lineStart..<inner.upperBound].firstIndex(of: "\n") ?? inner.upperBound
-            if text[lineStart..<lineEnd].hasPrefix("- ") {
+            let line = text[lineStart..<lineEnd]
+            let isContinuation = line.first?.isWhitespace == true && !line.allSatisfy(\.isWhitespace)
+            if line.hasPrefix("- ") {
                 ranges.append(lineStart..<lineEnd)
+            } else if isContinuation, let last = ranges.last, last.upperBound == text.index(before: lineStart) {
+                ranges[ranges.count - 1] = last.lowerBound..<lineEnd
             }
             lineStart = lineEnd < inner.upperBound ? text.index(after: lineEnd) : inner.upperBound
         }

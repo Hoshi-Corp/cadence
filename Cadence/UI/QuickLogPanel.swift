@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A Spotlight-style floating field for the quick log, opened by the global
+/// A Spotlight-style floating text area for the quick log, opened by the global
 /// shortcut. It doesn't activate Cadence, so the app you were in stays in front.
 @MainActor
 final class QuickLogPanelController {
@@ -86,31 +86,37 @@ struct QuickLogPanelView: View {
     let onSave: (String) -> Void
     let onCancel: () -> Void
     @State private var text = ""
-    @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.and.pencil")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            TextField("Log something…", text: $text)
-                .textFieldStyle(.plain)
-                .font(.title2)
-                .focused($isFocused)
-                .onSubmit(save)
-                .onExitCommand(perform: onCancel)
-            Text("⏎ save · esc close")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "square.and.pencil")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                LogTextEditor(
+                    text: $text,
+                    placeholder: "Log something…",
+                    fontSize: 17,
+                    lines: 4,
+                    bordered: false,
+                    focusOnAppear: true,
+                    onSubmit: save,
+                    onCancel: onCancel
+                )
+            }
+            Text("\(LogTextEditor.hint) · esc close")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(width: 460)
-        .onAppear { isFocused = true }
     }
 
     private func save() {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return onCancel() }
+        guard !LogEntry.multiline(text).isEmpty else { return onCancel() }
         onSave(text)
     }
 }

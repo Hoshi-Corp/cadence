@@ -31,8 +31,18 @@ struct MenuBarView: View {
                     Label("Today", systemImage: "list.bullet.rectangle")
                 }
                 .help("Review and edit today's entries")
-                Button("Open log file") { app.openTodaysLog() }
-                    .help("Open today's Markdown file")
+                Button {
+                    app.showActivity()
+                } label: {
+                    Label("Activity", systemImage: "chart.bar.xaxis")
+                }
+                .help("Review recorded app activity")
+                Button {
+                    app.openTodaysLog()
+                } label: {
+                    Image(systemName: "doc.text")
+                }
+                .help("Open today's Markdown file")
                 Spacer()
                 Button {
                     NSApp.activate()
@@ -197,27 +207,31 @@ private struct QuickLogSection: View {
     @State private var justSaved = false
 
     var body: some View {
-        HStack {
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(save)
-            if justSaved {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .transition(.opacity)
+        VStack(alignment: .leading, spacing: 4) {
+            LogTextEditor(text: $text, placeholder: "Quick log…", onSubmit: save)
+            HStack {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if justSaved {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .transition(.opacity)
+                }
             }
         }
     }
 
-    private var placeholder: String {
+    private var hint: String {
         let prefs = app.preferences.value
         return prefs.quickLogHotKeyEnabled
-            ? "Quick log… (⏎ to save, \(prefs.quickLogHotKey.displayString) anywhere)"
-            : "Quick log… (⏎ to save)"
+            ? "\(LogTextEditor.hint) · \(prefs.quickLogHotKey.displayString) anywhere"
+            : LogTextEditor.hint
     }
 
     private func save() {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !LogEntry.multiline(text).isEmpty else { return }
         app.quickLog(text)
         text = ""
         withAnimation { justSaved = true }

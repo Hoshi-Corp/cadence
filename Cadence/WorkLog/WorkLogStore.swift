@@ -25,9 +25,9 @@ final class WorkLogStore {
         folderURL.appendingPathComponent(WorkLogDocument.fileName(for: date))
     }
 
+    /// Adds a note. Line breaks are kept, as continuation lines of the list item.
     func addNote(_ text: String, at date: Date = Date()) {
-        let text = LogEntry.singleLine(text)
-        guard !text.isEmpty else { return }
+        guard !LogEntry.multiline(text).isEmpty else { return }
         let entry = LogEntry(date: date, kind: .note, text: text)
         write(for: date) { WorkLogDocument.appendingTimelineLine(entry.markdown, to: $0) }
     }
@@ -69,6 +69,12 @@ final class WorkLogStore {
     func addAway(from start: Date, to end: Date) {
         let entry = LogEntry(date: start, kind: .away(end: end), text: "Away")
         write(for: start) { WorkLogDocument.appendingTimelineLine(entry.markdown, to: $0) }
+    }
+
+    /// Replaces the day's Activity section with reviewed activity.
+    @discardableResult
+    func writeActivity(_ markdown: String, for date: Date) -> Bool {
+        write(for: date) { WorkLogDocument.replacingBlock(.activity, content: markdown, in: $0) }
     }
 
     // MARK: Reading and editing a day

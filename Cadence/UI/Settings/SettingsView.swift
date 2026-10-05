@@ -12,6 +12,8 @@ struct SettingsView: View {
                 .tabItem { Label("Reminders", systemImage: "bell") }
             WorkLogSettingsView()
                 .tabItem { Label("Work Log", systemImage: "doc.text") }
+            ActivitySettingsView()
+                .tabItem { Label("Activity", systemImage: "chart.bar.xaxis") }
         }
         .formStyle(.grouped)
         .frame(width: 500)
@@ -84,7 +86,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Settings file")
             } footer: {
-                Text("Copy your Pomodoro, reminder and shortcut settings to another Mac. Launch at login isn't included.")
+                Text("Copy your Pomodoro, reminder, activity and shortcut settings to another Mac. Launch at login isn't included.")
             }
 
             Section("About") {
@@ -132,7 +134,7 @@ struct GeneralSettingsView: View {
 
         let alert = NSAlert()
         alert.messageText = "Replace your settings with the ones in “\(url.lastPathComponent)”?"
-        alert.informativeText = "This replaces your Pomodoro, reminder, active hours, away and shortcut settings. "
+        alert.informativeText = "This replaces your Pomodoro, reminder, active hours, away, activity and shortcut settings. "
             + "Exported \(contents.exportedAt.formatted(date: .abbreviated, time: .shortened)) by Cadence \(contents.appVersion)."
         alert.addButton(withTitle: "Import")
         alert.addButton(withTitle: "Cancel")
@@ -306,7 +308,7 @@ struct WorkLogSettingsView: View {
             } header: {
                 Text("Quick log shortcut")
             } footer: {
-                Text("Opens a small field over any app. Type, press ⏎, and it's in today's log.")
+                Text("Opens a small text area over any app. Type, press ⏎, and it's in today's log. ⇧⏎ starts a new line.")
             }
         }
     }
@@ -332,5 +334,53 @@ struct WorkLogSettingsView: View {
         let url = app.workLog.folderURL
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         NSWorkspace.shared.open(url)
+    }
+}
+
+struct ActivitySettingsView: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        @Bindable var preferences = app.preferences
+
+        Form {
+            Section {
+                Toggle("Record which app is in front", isOn: $preferences.value.activity.isEnabled)
+                Stepper("Fold app switches shorter than \(preferences.value.activity.minimumSegmentMinutes) min into the activity around them",
+                        value: $preferences.value.activity.minimumSegmentMinutes, in: 1...30)
+                    .disabled(!preferences.value.activity.isEnabled)
+                HStack {
+                    Spacer()
+                    Button("Review Activity…") { app.showActivity() }
+                }
+            } header: {
+                Text("Activity tracking")
+            } footer: {
+                Text("Cadence notes the app in front and for how long. This needs no permission, pauses while you're away, and stays on this Mac until you write it to the log from the Activity window.")
+            }
+
+            Section {
+                ForEach($preferences.value.activity.rules) { $rule in
+                    HStack {
+                        ActivityRuleFields(rule: $rule)
+                        Button {
+                            preferences.value.activity.rules.removeAll { $0.id == rule.id }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Delete rule")
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("Add Rule") { preferences.value.activity.rules.append(ActivityRule()) }
+                }
+            } header: {
+                Text("Rules")
+            } footer: {
+                Text("Name activity after a task, e.g. App contains “Xcode” → Cadence. The first rule that matches wins, and activity with the same task joins into one segment. Window titles are recorded from activity tracking level 2, so title rules don't match anything yet.")
+            }
+        }
     }
 }

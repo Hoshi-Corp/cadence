@@ -15,7 +15,8 @@ struct LogEntry: Equatable {
 
     var markdown: String {
         let time = Self.time(date)
-        let text = Self.singleLine(text)
+        // Notes may span several lines; everything else stays on one.
+        let text = kind == .note ? Self.multiline(text) : Self.singleLine(text)
         switch kind {
         case .note:
             return "- **\(time)** \(text)"
@@ -41,5 +42,19 @@ struct LogEntry: Equatable {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    /// Keeps line breaks, indenting the lines after the first so they stay
+    /// part of the same list item. Blank lines are dropped for the same reason.
+    static func multiline(_ text: String) -> String {
+        var lines = text.split(whereSeparator: \.isNewline).map { line in
+            var line = String(line)
+            while let last = line.last, last.isWhitespace { line.removeLast() }
+            return line
+        }
+        lines.removeAll { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard let first = lines.first else { return "" }
+        let rest = lines.dropFirst().map { "  \($0)" }
+        return ([first.trimmingCharacters(in: .whitespaces)] + rest).joined(separator: "\n")
     }
 }

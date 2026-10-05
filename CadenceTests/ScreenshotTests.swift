@@ -17,6 +17,8 @@ struct ScreenshotTests {
         // Settings show the out-of-the-box preferences plus one custom reminder.
         let settingsApp = AppState(preferences: PreferencesStore(defaults: ephemeralDefaults()))
         settingsApp.preferences.value.logFolderPath = "~/Documents/Cadence"
+        settingsApp.preferences.value.activity.isEnabled = true
+        settingsApp.preferences.value.activity.rules = Self.demoRules
         settingsApp.preferences.value.reminders.append(Reminder(
             id: UUID(), emoji: "🥗", title: "Lunch", message: "Step away from the desk.",
             schedule: .daily(minuteOfDay: 12 * 60 + 30, weekdays: [2, 3, 4, 5, 6])
@@ -32,10 +34,15 @@ struct ScreenshotTests {
             ("settings-pomodoro", AnyView(PomodoroSettingsView())),
             ("settings-reminders", AnyView(RemindersSettingsView())),
             ("settings-work-log", AnyView(WorkLogSettingsView())),
+            ("settings-activity", AnyView(ActivitySettingsView())),
         ]
         try snapshot(
             TodayView().environment(try makeTodayApp()).frame(width: 520, height: 420),
             to: output.appendingPathComponent("today.png")
+        )
+        try snapshot(
+            ActivityReviewView().environment(try makeActivityApp()).frame(width: 600, height: 420),
+            to: output.appendingPathComponent("activity.png")
         )
         try snapshot(
             TimerAlertView().environment(try makeAlertApp()).background(.background),
@@ -122,10 +129,47 @@ struct ScreenshotTests {
         let auth = app.workLog.addFocusSession(FocusSession(task: "Refactor auth module", start: at(9, 5), end: at(9, 30)))
         app.workLog.addOutcome("extracted token service", to: auth)
         app.workLog.markReminderDone(Reminder.builtIns[1], at: at(9, 32))
-        app.workLog.addNote("Standup with team #meeting", at: at(10, 15))
+        app.workLog.addNote("Standup with team #meeting\n- auth module ships Friday\n- PR #412 needs a second reviewer",
+                            at: at(10, 15))
         app.workLog.addFocusSession(FocusSession(task: "Review PR #412", start: at(11, 0), end: at(11, 25)))
         app.workLog.addAway(from: at(12, 30), to: at(13, 10))
         app.workLog.addNote("Decided to ship v0.2 on Friday #decision", at: at(14, 2))
+        return app
+    }
+
+    private static let demoRules = [
+        ActivityRule(field: .app, pattern: "Xcode", task: "Cadence"),
+        ActivityRule(field: .app, pattern: "Terminal", task: "Cadence"),
+        ActivityRule(field: .windowTitle, pattern: "Pull Request", task: "Code review"),
+    ]
+
+    /// A morning of recorded activity, one segment renamed and one excluded.
+    private func makeActivityApp() throws -> AppState {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CadenceScreenshots-\(UUID())")
+        let preferences = PreferencesStore(defaults: ephemeralDefaults())
+        preferences.value.logFolderPath = folder.appendingPathComponent("log").path
+        preferences.value.activity.isEnabled = true
+        preferences.value.activity.rules = Self.demoRules
+        let store = ActivityStore(directory: folder.appendingPathComponent("activity"))
+        let app = AppState(preferences: preferences, stats: StatsStore(directory: folder.appendingPathComponent("stats")),
+                           activityStore: store, frontmostApp: { nil })
+
+        let day = Calendar.current.startOfDay(for: Date())
+        let spans: [(String, Int, Int)] = [
+            ("Mail", 8 * 60 + 52, 8), ("Xcode", 9 * 60, 40), ("Slack", 9 * 60 + 40, 3), ("Xcode", 9 * 60 + 43, 18),
+            ("Terminal", 10 * 60 + 1, 9), ("zoom.us", 10 * 60 + 10, 30), ("Safari", 10 * 60 + 40, 45),
+            ("Xcode", 11 * 60 + 25, 5), ("Safari", 11 * 60 + 30, 25), ("Music", 11 * 60 + 55, 20),
+        ]
+        var segments: [ActivitySegment] = []
+        for (name, start, minutes) in spans {
+            let span = AppSpan(appName: name, bundleID: "demo.\(name)", start: day + TimeInterval(start * 60),
+                               end: day + TimeInterval((start + minutes) * 60))
+            segments = ActivitySegmenter.append(span, to: segments, rules: Self.demoRules, minimum: 5 * 60)
+        }
+        segments = ActivitySegmenter.renaming(segments[2].id, to: "Standup", in: segments)
+        segments = ActivitySegmenter.renaming(segments[3].id, to: "Code review", in: segments)
+        segments = ActivitySegmenter.settingExcluded(true, for: [segments.last!.id], in: segments)
+        try store.update(for: day) { $0.segments = segments }
         return app
     }
 

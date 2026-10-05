@@ -29,4 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         appState.start()
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        appState.stop()
+    }
 }
