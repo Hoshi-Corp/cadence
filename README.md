@@ -296,6 +296,7 @@ point it at.
 | **v0.5** | Planned | Obsidian options (YAML front matter / Properties, `[[project]]` links, "Open in Obsidian"), end-of-day summary prompt, machine name in filenames for shared folders |
 | **v1.0** | Planned | Polish, onboarding, sounds, optional Developer ID signing and a notarized DMG, auto-update |
 | Later | Ideas | Weekly and monthly roll-ups, Shortcuts / AppleScript actions, calendar-aware reminders (held during meetings), focus modes during Pomodoros |
+| Later | Ideas | **iPhone and Apple Watch apps** that work seamlessly with the Mac: start, pause or skip a Pomodoro from any device and see the same countdown everywhere, get reminders on the wrist when away from the desk and mark them done there, and add quick log entries from the phone or watch. Needs sync between devices (e.g. iCloud), which changes the current "no network requests" design, so it would be opt-in |
 
 ### Activity tracking levels (v0.3+)
 
