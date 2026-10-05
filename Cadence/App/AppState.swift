@@ -21,6 +21,7 @@ final class AppState {
     let reminders: ReminderScheduler
     let workLog: WorkLogStore
     let idle: IdleMonitor
+    let activity: ActivityTracker
     @ObservationIgnored let notifications = NotificationService()
 
     private(set) var pendingOutcome: PendingOutcome?
@@ -34,11 +35,14 @@ final class AppState {
     @ObservationIgnored private var isRecordingHotKey = false
     @ObservationIgnored private var quickLogPanel: QuickLogPanelController?
     @ObservationIgnored private var todayWindow: TodayWindowController?
+    @ObservationIgnored private var activityWindow: ActivityWindowController?
     @ObservationIgnored private var timerAlertWindow: TimerAlertController?
 
     init(
         preferences: PreferencesStore = PreferencesStore(),
         stats: StatsStore = StatsStore(),
+        activityStore: ActivityStore = ActivityStore(),
+        frontmostApp: @escaping @MainActor () -> FrontApp? = ActivityTracker.systemFrontmostApp,
         idleSeconds: @escaping () -> TimeInterval = IdleMonitor.systemIdleSeconds,
         clock: @escaping () -> Date = Date.init
     ) {
@@ -51,6 +55,10 @@ final class AppState {
             preferences: preferences, isFocusing: { pomodoro.isFocusing }, isAway: { idle.isAway }, clock: clock
         )
         self.workLog = WorkLogStore(preferences: preferences, stats: stats)
+        self.activity = ActivityTracker(
+            preferences: preferences, store: activityStore, frontmostApp: frontmostApp,
+            awaySince: { idle.awaySince }, clock: clock
+        )
 
         pomodoro.onEvent = { [weak self] in self?.handle($0) }
         reminders.onDue = { [weak self] in self?.notifications.postReminder($0) }
@@ -62,6 +70,7 @@ final class AppState {
         timerAlertWindow = TimerAlertController(app: self)
         notifications.configure()
         reminders.tick()
+        activity.start()
 
         HotKeyCenter.shared.onPress = { [weak self] in self?.showQuickLogPanel() }
         applyHotKey()
@@ -69,12 +78,16 @@ final class AppState {
             if old.quickLogHotKey != new.quickLogHotKey || old.quickLogHotKeyEnabled != new.quickLogHotKeyEnabled {
                 self?.applyHotKey()
             }
+            if old.activity.isEnabled != new.activity.isEnabled {
+                self?.activity.sync()
+            }
         }
 
         let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.idle.tick()
                 self?.reminders.tick()
+                self?.activity.tick()
             }
         }
         timer.tolerance = 5
@@ -87,9 +100,34 @@ final class AppState {
                 MainActor.assumeIsolated { self?.systemWillSleep() }
             },
             center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reminders.restartIntervals() }
+                MainActor.assumeIsolated {
+                    self?.activity.resume(.asleep)
+                    self?.reminders.restartIntervals()
+                }
+            },
+            center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) {
+                [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                let front = app.map { FrontApp(name: $0.localizedName ?? $0.bundleIdentifier ?? "Unknown", bundleID: $0.bundleIdentifier) }
+                MainActor.assumeIsolated {
+                    if let front { self?.activity.appDidActivate(front) }
+                }
+            },
+            // Fast user switching: another user's session is in front.
+            center.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) {
+                [weak self] _ in
+                MainActor.assumeIsolated { self?.activity.suspend(.sessionInactive) }
+            },
+            center.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) {
+                [weak self] _ in
+                MainActor.assumeIsolated { self?.activity.resume(.sessionInactive) }
             },
         ]
+    }
+
+    /// Saves what's being recorded before the app quits.
+    func stop() {
+        activity.stop()
     }
 
     // MARK: User actions
@@ -144,6 +182,23 @@ final class AppState {
     func showToday() {
         if todayWindow == nil { todayWindow = TodayWindowController(app: self) }
         todayWindow?.show()
+    }
+
+    func showActivity() {
+        if activityWindow == nil { activityWindow = ActivityWindowController(app: self) }
+        activityWindow?.show()
+    }
+
+    /// Replaces the day's Activity section in the work log with its reviewed segments.
+    @discardableResult
+    func writeActivityToLog(for date: Date) -> Bool {
+        if Calendar.current.isDateInToday(date) { activity.flush() }
+        let markdown = ActivityLog.markdown(
+            for: activity.segments(for: date), rules: preferences.value.activity.rules
+        )
+        guard workLog.writeActivity(markdown, for: date) else { return false }
+        activity.markWritten(on: date)
+        return true
     }
 
     // MARK: Settings
@@ -232,11 +287,13 @@ final class AppState {
 
     private func systemWillSleep() {
         if pomodoro.isFocusing { pomodoro.pause() }
+        activity.suspend(.asleep)
     }
 
     /// Being away counts as a break from the desk, so interval reminders start over.
     private func userReturned(from start: Date, to end: Date) {
         reminders.restartIntervals()
+        activity.sync(at: end)
         if preferences.value.idle.logAwayTime {
             workLog.addAway(from: start, to: end)
         }

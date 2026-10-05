@@ -75,10 +75,13 @@ struct TodayView: View {
             }
             if isToday {
                 Divider()
-                TextField("Add an entry… (⏎ to save)", text: $newEntry)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(addEntry)
-                    .padding(12)
+                VStack(alignment: .leading, spacing: 4) {
+                    LogTextEditor(text: $newEntry, placeholder: "Add an entry…", lines: 2, onSubmit: addEntry)
+                    Text(LogTextEditor.hint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
             }
         }
         .onAppear(perform: reload)
@@ -153,7 +156,7 @@ struct TodayView: View {
     }
 
     private func addEntry() {
-        guard !newEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !LogEntry.multiline(newEntry).isEmpty else { return }
         app.quickLog(newEntry)
         newEntry = ""
     }
@@ -206,7 +209,6 @@ private struct TimelineItemEditor: View {
     let onCancel: () -> Void
     @State private var time: String
     @State private var text: String
-    @FocusState private var isTextFocused: Bool
 
     init(item: TimelineItem, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.item = item
@@ -222,26 +224,35 @@ private struct TimelineItemEditor: View {
     }
 
     private var canSave: Bool {
-        timeIsValid && !LogEntry.singleLine(text).isEmpty
+        timeIsValid && !LogEntry.multiline(text).isEmpty
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             TextField("09:00", text: $time)
+                .textFieldStyle(.roundedBorder)
                 .monospacedDigit()
                 .frame(width: 92)
                 .foregroundStyle(timeIsValid ? Color.primary : Color.red)
                 .help("HH:MM, or a range like 09:00–09:25")
-            TextField("Entry", text: $text)
-                .focused($isTextFocused)
-            Button("Save") { onSave(TimelineItem.line(time: time, text: text)) }
+                .onSubmit(save)
+            LogTextEditor(
+                text: $text,
+                placeholder: "Entry",
+                lines: max(2, min(6, text.split(separator: "\n").count)),
+                focusOnAppear: true,
+                onSubmit: save,
+                onCancel: onCancel
+            )
+            Button("Save", action: save)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
             Button("Cancel", action: onCancel)
                 .keyboardShortcut(.cancelAction)
         }
-        .textFieldStyle(.roundedBorder)
-        .onSubmit { if canSave { onSave(TimelineItem.line(time: time, text: text)) } }
-        .onAppear { isTextFocused = true }
+    }
+
+    private func save() {
+        if canSave { onSave(TimelineItem.line(time: time, text: text)) }
     }
 }

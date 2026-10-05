@@ -5,10 +5,12 @@ import Foundation
 struct TimelineItem: Equatable, Identifiable {
     /// Position among the timeline's list items, counting from 0.
     let index: Int
-    /// The whole line as it appears in the file, e.g. `- **09:05** Standup`.
+    /// The whole item as it appears in the file, e.g. `- **09:05** Standup`.
+    /// A multi-line note continues on indented lines.
     let line: String
     /// `09:05` or `09:05–09:30`, nil when the line has no bold time prefix.
     let time: String?
+    /// The text without the time. Continuation lines are included, unindented.
     let text: String
 
     var id: Int { index }
@@ -16,23 +18,33 @@ struct TimelineItem: Equatable, Identifiable {
     init(index: Int, line: String) {
         self.index = index
         self.line = line
-        let body = line.hasPrefix("- ") ? line.dropFirst(2) : Substring(line)
+        let lines = line.split(separator: "\n", omittingEmptySubsequences: false)
+        let continuation = lines.dropFirst().map(Self.unindented)
+        let first = lines.first ?? ""
+        let body = first.hasPrefix("- ") ? first.dropFirst(2) : first
+        var time: String?
+        var head = body.trimmingCharacters(in: .whitespaces)
         if body.hasPrefix("**") {
             let afterOpen = body.dropFirst(2)
             if let close = afterOpen.range(of: "**"),
                Self.isValidTime(afterOpen[..<close.lowerBound]) {
                 time = String(afterOpen[..<close.lowerBound])
-                text = afterOpen[close.upperBound...].trimmingCharacters(in: .whitespaces)
-                return
+                head = afterOpen[close.upperBound...].trimmingCharacters(in: .whitespaces)
             }
         }
-        time = nil
-        text = body.trimmingCharacters(in: .whitespaces)
+        self.time = time
+        text = ([head] + continuation).joined(separator: "\n")
     }
 
-    /// The Markdown line for this item with a new time and text.
+    /// Removes the indent that keeps a continuation line inside its list item.
+    private static func unindented(_ line: Substring) -> String {
+        if line.hasPrefix("\t") { return String(line.dropFirst()) }
+        return String(line.dropFirst(min(2, line.prefix { $0 == " " }.count)))
+    }
+
+    /// The Markdown for this item with a new time and text.
     static func line(time: String?, text: String) -> String {
-        let text = LogEntry.singleLine(text)
+        let text = LogEntry.multiline(text)
         guard let time = time?.trimmingCharacters(in: .whitespaces), !time.isEmpty else { return "- \(text)" }
         return "- **\(time)** \(text)"
     }

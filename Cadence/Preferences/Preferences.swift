@@ -48,6 +48,7 @@ struct Preferences: Codable, Equatable {
     var idle = IdleConfig()
     var quickLogHotKeyEnabled = true
     var quickLogHotKey = HotKey.defaultQuickLog
+    var activity = ActivityConfig()
 
     static var defaultLogFolderPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -72,11 +73,12 @@ struct Preferences: Codable, Equatable {
         quickLogHotKeyEnabled = try c.decodeIfPresent(Bool.self, forKey: .quickLogHotKeyEnabled)
             ?? defaults.quickLogHotKeyEnabled
         quickLogHotKey = try c.decodeIfPresent(HotKey.self, forKey: .quickLogHotKey) ?? defaults.quickLogHotKey
+        activity = try c.decodeIfPresent(ActivityConfig.self, forKey: .activity) ?? defaults.activity
     }
 
     private enum CodingKeys: String, CodingKey {
         case pomodoro, activeHours, holdRemindersDuringFocus, reminders, logFolderPath
-        case idle, quickLogHotKeyEnabled, quickLogHotKey, showTimerAlert
+        case idle, quickLogHotKeyEnabled, quickLogHotKey, showTimerAlert, activity
     }
 
     /// Clamps values that would make timers misbehave, for settings that come
@@ -90,6 +92,7 @@ struct Preferences: Codable, Equatable {
         result.activeHours.startMinute = min(max(0, activeHours.startMinute), 24 * 60)
         result.activeHours.endMinute = min(max(0, activeHours.endMinute), 24 * 60)
         result.idle.thresholdMinutes = max(1, idle.thresholdMinutes)
+        result.activity.minimumSegmentMinutes = min(max(1, activity.minimumSegmentMinutes), 60)
         for index in result.reminders.indices {
             switch result.reminders[index].schedule {
             case .interval(let minutes):
