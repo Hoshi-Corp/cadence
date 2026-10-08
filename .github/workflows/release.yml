@@ -125,9 +125,10 @@ jobs:
           if [ "$NOTARIZE" != "true" ]; then
             quarantine='
             # Ad-hoc signed, not notarized, so Gatekeeper would block it.
-            postflight do
-              system_command "/usr/bin/xattr",
-                             args: ["-dr", "com.apple.quarantine", "#{appdir}/Cadence.app"]
+            postflight_steps do
+              run "/usr/bin/xattr",
+                  args:           ["-dr", "com.apple.quarantine", "{{appdir}}/Cadence.app"],
+                  writable_paths: ["{{appdir}}/Cadence.app"]
             end
           '
           fi
@@ -142,7 +143,7 @@ jobs:
             desc "Menu bar Pomodoro timer with break reminders and a Markdown work log"
             homepage "https://github.com/${GITHUB_REPOSITORY}"
 
-            depends_on macos: ">= :sonoma"
+            depends_on macos: :sonoma
 
             app "Cadence.app"
           ${quarantine}
