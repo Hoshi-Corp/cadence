@@ -301,8 +301,8 @@ point it at.
 | **v0.1** | ✅ Released | Menu bar app, Pomodoro timer, three wellness reminders held during focus, quick log, daily Markdown file with marker-based sections, folder picker, launch at login |
 | **v0.2** | ✅ Released | Custom reminders (interval, fixed time, one-off), global hotkey for quick log, **Today** view to edit and delete entries, idle detection (resets reminders after you've been away), export and import of settings |
 | **v0.3** | ✅ Released | Automatic activity tracking, level 1 (frontmost app, no permission needed), merging of activity into segments, **Activity Review** window to rename, merge, split or exclude segments, rules that map apps or window titles to tasks |
-| **v0.4** | 🚧 In progress | Activity tracking levels 2–3 (window titles via Accessibility, browser tabs via Automation), private segments, ignore list |
-| **v0.5** | Planned | Obsidian options (YAML front matter / Properties, `[[project]]` links, "Open in Obsidian"), end-of-day summary prompt, machine name in filenames for shared folders |
+| **v0.4** | ✅ Released | Activity tracking levels 2–3 (window titles via Accessibility, browser tabs via Automation), private segments, ignore list |
+| **v0.5** | ⏳ Next | Obsidian options (YAML front matter / Properties, `[[project]]` links, "Open in Obsidian"), end-of-day summary prompt, machine name in filenames for shared folders |
 | **v1.0** | Planned | Polish, onboarding, sounds, optional Developer ID signing and a notarized DMG, auto-update |
 | Later | Ideas | Weekly and monthly roll-ups, Shortcuts / AppleScript actions, calendar-aware reminders (held during meetings), focus modes during Pomodoros |
 | Later | Ideas | **iPhone and Apple Watch apps** that work seamlessly with the Mac: start, pause or skip a Pomodoro from any device and see the same countdown everywhere, get reminders on the wrist when away from the desk and mark them done there, and add quick log entries from the phone or watch. Needs sync between devices (e.g. iCloud), which changes the current "no network requests" design, so it would be opt-in |
