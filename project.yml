@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.3.0"
+    MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "1"
 
 targets:
@@ -28,12 +28,18 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
+        NSAppleEventsUsageDescription: >-
+          Cadence reads the title and address of the browser tab in front, for activity
+          tracking. It stays on this Mac until you write it to your work log.
     entitlements:
       path: Cadence/Cadence.entitlements
       properties:
         # Unsandboxed on purpose: activity tracking (v0.3+) relies on the
         # Accessibility API, which sandboxed apps cannot use.
         com.apple.security.app-sandbox: false
+        # Activity tracking level 3 reads browser tabs over Apple events, which
+        # the hardened runtime of release builds blocks without this.
+        com.apple.security.automation.apple-events: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.masaruhoshi.cadence

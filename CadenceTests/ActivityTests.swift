@@ -5,8 +5,9 @@ import Testing
 private let day = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 9))!
 
 /// A span `minutes` long starting `at` minutes after 09:00.
-private func span(_ app: String, at start: Double, minutes: Double, title: String? = nil) -> AppSpan {
-    AppSpan(appName: app, bundleID: "com.example.\(app.lowercased())", windowTitle: title,
+private func span(_ app: String, at start: Double, minutes: Double, title: String? = nil, url: String? = nil)
+    -> AppSpan {
+    AppSpan(appName: app, bundleID: "com.example.\(app.lowercased())", windowTitle: title, url: url,
             start: day + start * 60, end: day + (start + minutes) * 60)
 }
 
@@ -108,6 +109,57 @@ struct ActivitySegmenterTests {
         #expect(ActivityLog.markdown(for: none, rules: []) == "## Activity\n\nNothing recorded.")
     }
 
+    @Test func privateSegmentsShowTheirTimesOnly() throws {
+        var segments = segmented([span("Xcode", at: 0, minutes: 20), span("Safari", at: 20, minutes: 10)])
+        segments = ActivitySegmenter.settingPrivate(true, for: [segments[1].id], in: segments)
+        #expect(ActivityLog.markdown(for: segments, rules: [])
+            == "## Activity\n\n- **09:00–09:20** Xcode\n- **09:20–09:30** 🔒 Private")
+
+        // Merging never reveals a private part.
+        let merged = try #require(ActivitySegmenter.merging([segments[0].id, segments[1].id], in: segments))
+        #expect(merged[0].isPrivate)
+    }
+
+    @Test func urlRulesAndTheIgnoreList() {
+        let tab = span("Safari", at: 0, minutes: 5, title: "Pull requests", url: "https://www.github.com/acme/app/pulls")
+        #expect(tab.host == "github.com")
+        #expect(ActivityRule(field: .url, pattern: "github.com/acme", task: "Acme").matches(tab))
+        #expect(!ActivityRule(field: .url, pattern: "github.com/acme", task: "Acme")
+            .matches(span("Safari", at: 0, minutes: 5, title: "Pull requests")))
+
+        var config = ActivityConfig()
+        config.ignored = [ActivityIgnore(field: .app, pattern: " "), ActivityIgnore(field: .windowTitle, pattern: "bank")]
+        #expect(!config.ignores(tab))
+        #expect(config.ignores(span("Safari", at: 0, minutes: 5, title: "My Bank — Accounts")))
+    }
+
+    @Test func windowTitlesAreListedPerSegment() {
+        let segments = segmented([
+            span("Safari", at: 0, minutes: 10, title: "Docs", url: "https://developer.apple.com/documentation"),
+            span("Safari", at: 10, minutes: 2, title: "Inbox"),
+            span("Safari", at: 12, minutes: 5, title: "Docs", url: "https://developer.apple.com/documentation"),
+        ])
+        #expect(segments.count == 1)
+        #expect(segments[0].spans.count == 3)
+        #expect(segments[0].windowTitles.map(\.name) == ["Docs — developer.apple.com", "Inbox"])
+        #expect(segments[0].usage.map(\.name) == ["Safari"])
+    }
+
+    @Test func readsActivitySavedByVersion03() throws {
+        let json = """
+            {"segments":[{"id":"6F1C1D2E-0000-4000-8000-000000000001","isExcluded":false,"isEdited":false,
+            "spans":[{"appName":"Xcode","bundleID":"com.apple.dt.Xcode","start":781340400,"end":781341600}]}]}
+            """
+        let day = try JSONDecoder().decode(ActivityDay.self, from: Data(json.utf8))
+        #expect(day.segments.count == 1)
+        #expect(!day.segments[0].isPrivate)
+        #expect(day.segments[0].spans[0].url == nil)
+
+        let config = try JSONDecoder().decode(ActivityConfig.self, from: Data(#"{"isEnabled":true,"minimumSegmentMinutes":7,"rules":[]}"#.utf8))
+        #expect(config.isEnabled && config.minimumSegmentMinutes == 7)
+        #expect(!config.recordsWindowTitles && !config.recordsBrowserTabs && config.ignored.isEmpty)
+    }
+
     @Test func splitsSpansAtMidnight() {
         let late = Calendar.current.date(bySettingHour: 23, minute: 50, second: 0, of: day)!
         let parts = AppSpan(appName: "Xcode", start: late, end: late + 30 * 60).splitAtMidnight()
@@ -120,6 +172,7 @@ struct ActivityTrackerTests {
     let clock = TestClock()
     let front = FrontAppBox()
     let away = AwayBox()
+    let window = WindowBox()
     let preferences = PreferencesStore(defaults: UserDefaults(suiteName: "ActivityTrackerTests-\(UUID())")!)
     let store = ActivityStore(directory: FileManager.default.temporaryDirectory
         .appendingPathComponent("CadenceActivityTests-\(UUID())"))
@@ -130,9 +183,75 @@ struct ActivityTrackerTests {
     }
 
     func makeTracker() -> ActivityTracker {
-        let clock = clock, front = front, away = away
-        return ActivityTracker(preferences: preferences, store: store, frontmostApp: { front.app },
-                               awaySince: { away.since }, clock: { clock.now })
+        let clock = clock, front = front, away = away, window = window
+        return ActivityTracker(
+            preferences: preferences, store: store, frontmostApp: { front.app },
+            details: { app, config in
+                var app = app
+                if config.recordsWindowTitles { app.windowTitle = window.title }
+                if config.recordsBrowserTabs { app.url = window.url }
+                return app
+            },
+            awaySince: { away.since }, clock: { clock.now }
+        )
+    }
+
+    @Test func recordsWindowTitleChangesWithinOneSegment() throws {
+        preferences.value.activity.recordsWindowTitles = true
+        window.title = "AppState.swift"
+        let tracker = makeTracker()
+        tracker.start()
+        clock.advance(minutes: 10)
+        window.title = "ActivityTracker.swift"
+        tracker.poll()
+        clock.advance(minutes: 10)
+        tracker.stop()
+
+        let segments = store.load(for: day).segments
+        #expect(segments.count == 1)
+        #expect(segments[0].spans.map(\.windowTitle) == ["AppState.swift", "ActivityTracker.swift"])
+        #expect(segments[0].duration == 20 * 60)
+    }
+
+    @Test func pollingDoesNothingWithoutWindowTitles() {
+        window.title = "AppState.swift"
+        let tracker = makeTracker()
+        tracker.start()
+        clock.advance(minutes: 10)
+        front.app = FrontApp(name: "Safari", bundleID: "com.apple.Safari")
+        tracker.poll()
+        #expect(tracker.current?.appName == "Xcode")
+        #expect(tracker.current?.windowTitle == nil)
+    }
+
+    @Test func ignoredAppsAreLeftOut() throws {
+        preferences.value.activity.ignored = [ActivityIgnore(field: .app, pattern: "1Password")]
+        let tracker = makeTracker()
+        tracker.start()
+        clock.advance(minutes: 20)
+        tracker.appDidActivate(FrontApp(name: "1Password", bundleID: "com.1password.1password"))
+        #expect(tracker.current == nil)
+        clock.advance(minutes: 5)
+        tracker.appDidActivate(FrontApp(name: "Safari", bundleID: "com.apple.Safari"))
+        clock.advance(minutes: 10)
+        tracker.stop()
+
+        let segments = store.load(for: day).segments
+        #expect(segments.map { $0.title(rules: []) } == ["Xcode", "Safari"])
+        #expect(segments[0].end == day + 20 * 60)
+        #expect(segments[1].start == day + 25 * 60)
+    }
+
+    @Test func addingToTheIgnoreListStopsRecordingAtOnce() throws {
+        let tracker = makeTracker()
+        tracker.start()
+        clock.advance(minutes: 10)
+        preferences.value.activity.ignored = [ActivityIgnore(field: .app, pattern: "Xcode")]
+        tracker.sync()
+        #expect(tracker.current == nil)
+        let segments = store.load(for: day).segments
+        #expect(segments.count == 1)
+        #expect(try #require(segments.first).duration == 10 * 60)
     }
 
     @Test func recordsAppSwitches() {
@@ -224,6 +343,11 @@ struct ActivityTrackerTests {
 
 @MainActor final class FrontAppBox {
     var app: FrontApp? = FrontApp(name: "Xcode", bundleID: "com.apple.dt.Xcode")
+}
+
+@MainActor final class WindowBox {
+    var title: String?
+    var url: String?
 }
 
 @MainActor final class AwayBox {

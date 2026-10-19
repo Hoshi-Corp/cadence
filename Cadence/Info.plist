@@ -24,5 +24,7 @@
 	<string>public.app-category.productivity</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Cadence reads the title and address of the browser tab in front, for activity tracking. It stays on this Mac until you write it to your work log.</string>
 </dict>
 </plist>

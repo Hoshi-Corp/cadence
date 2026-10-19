@@ -339,16 +339,36 @@ struct WorkLogSettingsView: View {
 
 struct ActivitySettingsView: View {
     @Environment(AppState.self) private var app
+    @State private var hasWindowTitleAccess = FrontWindowReader.hasWindowTitleAccess
 
     var body: some View {
         @Bindable var preferences = app.preferences
+        let activity = preferences.value.activity
 
         Form {
             Section {
                 Toggle("Record which app is in front", isOn: $preferences.value.activity.isEnabled)
-                Stepper("Fold app switches shorter than \(preferences.value.activity.minimumSegmentMinutes) min into the activity around them",
+                Toggle("Also record window titles", isOn: $preferences.value.activity.recordsWindowTitles)
+                    .disabled(!activity.isEnabled)
+                    .onChange(of: activity.recordsWindowTitles) { _, isOn in
+                        if isOn && !FrontWindowReader.hasWindowTitleAccess {
+                            FrontWindowReader.requestWindowTitleAccess()
+                        }
+                    }
+                if activity.isEnabled && activity.recordsWindowTitles && !hasWindowTitleAccess {
+                    HStack {
+                        Text("Window titles need Accessibility access. Until you allow it, Cadence records the app only.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        Spacer()
+                        Button("Open Settings…") { FrontWindowReader.openAccessibilitySettings() }
+                    }
+                }
+                Toggle("Also record browser tabs", isOn: $preferences.value.activity.recordsBrowserTabs)
+                    .disabled(!activity.isEnabled || !activity.recordsWindowTitles)
+                Stepper("Fold app switches shorter than \(activity.minimumSegmentMinutes) min into the activity around them",
                         value: $preferences.value.activity.minimumSegmentMinutes, in: 1...30)
-                    .disabled(!preferences.value.activity.isEnabled)
+                    .disabled(!activity.isEnabled)
                 HStack {
                     Spacer()
                     Button("Review Activity…") { app.showActivity() }
@@ -356,20 +376,27 @@ struct ActivitySettingsView: View {
             } header: {
                 Text("Activity tracking")
             } footer: {
-                Text("Cadence notes the app in front and for how long. This needs no permission, pauses while you're away, and stays on this Mac until you write it to the log from the Activity window.")
+                Text("""
+                    The app in front needs no permission. Window titles need Accessibility access. \
+                    Browser tabs add the page's address in Safari, Chrome, Arc, Brave, Edge and Vivaldi; macOS \
+                    asks once per browser, and you can change it in System Settings → Privacy & Security → \
+                    Automation. Once Cadence can read a Chrome-based browser's tabs, its incognito windows aren't recorded. Recording pauses while you're away, and \
+                    everything stays on this Mac until you write it to the log from the Activity window.
+                    """)
+            }
+            .task(id: activity.recordsWindowTitles) {
+                // Access is granted in System Settings, so check back while this is open.
+                while activity.recordsWindowTitles && !Task.isCancelled {
+                    hasWindowTitleAccess = FrontWindowReader.hasWindowTitleAccess
+                    try? await Task.sleep(for: .seconds(2))
+                }
             }
 
             Section {
                 ForEach($preferences.value.activity.rules) { $rule in
                     HStack {
                         ActivityRuleFields(rule: $rule)
-                        Button {
-                            preferences.value.activity.rules.removeAll { $0.id == rule.id }
-                        } label: {
-                            Image(systemName: "minus.circle")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Delete rule")
+                        deleteButton("Delete rule") { preferences.value.activity.rules.removeAll { $0.id == rule.id } }
                     }
                 }
                 HStack {
@@ -379,8 +406,35 @@ struct ActivitySettingsView: View {
             } header: {
                 Text("Rules")
             } footer: {
-                Text("Name activity after a task, e.g. App contains “Xcode” → Cadence. The first rule that matches wins, and activity with the same task joins into one segment. Window titles are recorded from activity tracking level 2, so title rules don't match anything yet.")
+                Text("Name activity after a task, e.g. App contains “Xcode” → Cadence. The first rule that matches wins, and activity with the same task joins into one segment. Window title and URL rules match only what's recorded, so they need window titles or browser tabs on.")
+            }
+
+            Section {
+                ForEach($preferences.value.activity.ignored) { $item in
+                    HStack {
+                        ActivityMatchFields(field: $item.field, pattern: $item.pattern)
+                        deleteButton("Remove from the ignore list") {
+                            preferences.value.activity.ignored.removeAll { $0.id == item.id }
+                        }
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("Add") { preferences.value.activity.ignored.append(ActivityIgnore()) }
+                }
+            } header: {
+                Text("Ignore list")
+            } footer: {
+                Text("Nothing is recorded while a matching app, window or page is in front, e.g. App contains “1Password”. That time is left out, as if you were away.")
             }
         }
+    }
+
+    private func deleteButton(_ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "minus.circle")
+        }
+        .buttonStyle(.borderless)
+        .help(help)
     }
 }

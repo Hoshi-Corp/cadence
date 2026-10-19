@@ -45,10 +45,14 @@ enum ActivityLog {
             .joined(separator: "\n")
     }
 
-    /// e.g. `- **09:05–09:40** Cadence · Xcode 30m, Safari 5m`
+    static let privateTitle = "🔒 Private"
+
+    /// e.g. `- **09:05–09:40** Cadence · Xcode 30m, Safari 5m`. A private
+    /// segment shows its times only.
     static func line(for segment: ActivitySegment, rules: [ActivityRule]) -> String {
-        let title = LogEntry.singleLine(segment.title(rules: rules))
         let time = "\(LogEntry.time(segment.start))–\(LogEntry.time(segment.end))"
+        guard !segment.isPrivate else { return "- **\(time)** \(privateTitle)" }
+        let title = LogEntry.singleLine(segment.title(rules: rules))
         let usage = segment.usage
         // The breakdown adds nothing when the title already names the only app.
         guard !(usage.count == 1 && usage[0].name == title) else { return "- **\(time)** \(title)" }

@@ -31,6 +31,7 @@ final class AppState {
     private(set) var hotKeyError: String?
 
     @ObservationIgnored private var reminderTimer: Timer?
+    @ObservationIgnored private var activityPollTimer: Timer?
     @ObservationIgnored private var workspaceObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var isRecordingHotKey = false
     @ObservationIgnored private var quickLogPanel: QuickLogPanelController?
@@ -78,7 +79,8 @@ final class AppState {
             if old.quickLogHotKey != new.quickLogHotKey || old.quickLogHotKeyEnabled != new.quickLogHotKeyEnabled {
                 self?.applyHotKey()
             }
-            if old.activity.isEnabled != new.activity.isEnabled {
+            // e.g. a new ignore list entry stops recording at once.
+            if old.activity != new.activity {
                 self?.activity.sync()
             }
         }
@@ -94,6 +96,13 @@ final class AppState {
         RunLoop.main.add(timer, forMode: .common)
         reminderTimer = timer
 
+        let poll = Timer(timeInterval: ActivityTracker.pollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.activity.poll() }
+        }
+        poll.tolerance = 1
+        RunLoop.main.add(poll, forMode: .common)
+        activityPollTimer = poll
+
         let center = NSWorkspace.shared.notificationCenter
         workspaceObservers = [
             center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
@@ -108,7 +117,7 @@ final class AppState {
             center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) {
                 [weak self] note in
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-                let front = app.map { FrontApp(name: $0.localizedName ?? $0.bundleIdentifier ?? "Unknown", bundleID: $0.bundleIdentifier) }
+                let front = app.map(FrontApp.init)
                 MainActor.assumeIsolated {
                     if let front { self?.activity.appDidActivate(front) }
                 }

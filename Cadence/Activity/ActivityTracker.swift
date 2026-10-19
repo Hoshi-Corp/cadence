@@ -1,15 +1,29 @@
 import AppKit
 import Observation
 
-/// An app in front, as the system reports it.
+/// An app in front, as the system reports it, with its window and browser
+/// tab when those are recorded.
 struct FrontApp: Equatable {
     var name: String
     var bundleID: String?
+    var pid: pid_t?
+    var windowTitle: String?
+    var url: String?
 }
 
-/// Records which app is in front (activity tracking level 1). Needs no
-/// permission. Recording stops while the user is away, the Mac sleeps or
-/// another user's session is in front.
+// In an extension so Swift still generates the memberwise init.
+extension FrontApp {
+    init(_ app: NSRunningApplication) {
+        self.init(name: app.localizedName ?? app.bundleIdentifier ?? "Unknown", bundleID: app.bundleIdentifier,
+                  pid: app.processIdentifier)
+    }
+}
+
+/// Records which app is in front (activity tracking level 1, no permission
+/// needed), and optionally its window title (level 2) and browser tab
+/// (level 3). Recording stops while the user is away, the Mac sleeps or
+/// another user's session is in front, and while something on the ignore
+/// list is in front.
 @MainActor @Observable
 final class ActivityTracker {
     enum Suspension: Hashable { case asleep, sessionInactive }
@@ -23,6 +37,8 @@ final class ActivityTracker {
     @ObservationIgnored private let preferences: PreferencesStore
     @ObservationIgnored private let store: ActivityStore
     @ObservationIgnored private let frontmostApp: @MainActor () -> FrontApp?
+    /// Adds the window title and browser tab the settings ask for.
+    @ObservationIgnored private let details: @MainActor (FrontApp, ActivityConfig) -> FrontApp
     /// When the user went away, or nil while they're here.
     @ObservationIgnored private let awaySince: () -> Date?
     @ObservationIgnored private let clock: () -> Date
@@ -32,18 +48,24 @@ final class ActivityTracker {
     @ObservationIgnored private var lastCheckpoint = Date.distantPast
 
     static let checkpointInterval: TimeInterval = 60
+    /// How often the window title is checked: titles change without the app switching.
+    static let pollInterval: TimeInterval = 5
     nonisolated static let ownBundleID = Bundle.main.bundleIdentifier
 
     init(
         preferences: PreferencesStore,
         store: ActivityStore = ActivityStore(),
         frontmostApp: @escaping @MainActor () -> FrontApp? = ActivityTracker.systemFrontmostApp,
+        details: @escaping @MainActor (FrontApp, ActivityConfig) -> FrontApp = {
+            FrontWindowReader.shared.details(for: $0, config: $1)
+        },
         awaySince: @escaping () -> Date? = { nil },
         clock: @escaping () -> Date = Date.init
     ) {
         self.preferences = preferences
         self.store = store
         self.frontmostApp = frontmostApp
+        self.details = details
         self.awaySince = awaySince
         self.clock = clock
     }
@@ -74,10 +96,7 @@ final class ActivityTracker {
 
     func appDidActivate(_ app: FrontApp) {
         guard canRecord, app.bundleID != Self.ownBundleID else { return }
-        if let current, current.appName == app.name, current.bundleID == app.bundleID { return }
-        let now = clock()
-        close(at: now)
-        open(app, at: now)
+        show(details(app, config), at: clock())
     }
 
     func suspend(_ reason: Suspension) {
@@ -90,15 +109,24 @@ final class ActivityTracker {
         sync()
     }
 
-    /// Starts or stops recording to match the settings, being away and sleep.
-    /// `date` is when that changed, if it's known more precisely than now.
+    /// Starts or stops recording to match the settings, being away and sleep,
+    /// and picks up a new window title. `date` is when that changed, if it's
+    /// known more precisely than now.
     func sync(at date: Date? = nil) {
         if canRecord {
-            guard current == nil, let app = frontmostApp(), app.bundleID != Self.ownBundleID else { return }
-            open(app, at: date ?? clock())
+            // Switching to Cadence itself isn't recorded: the app before carries on.
+            guard let app = frontmostApp(), app.bundleID != Self.ownBundleID else { return }
+            show(details(app, config), at: date ?? clock())
         } else {
             close(at: awaySince() ?? date ?? clock())
         }
+    }
+
+    /// Called every few seconds. Window titles change without an app switch,
+    /// so they're checked here.
+    func poll() {
+        guard config.recordsWindowTitles else { return }
+        sync()
     }
 
     /// Called every 20 seconds.
@@ -111,7 +139,7 @@ final class ActivityTracker {
             // Each day's activity goes in that day's file.
             let midnight = calendar.startOfDay(for: now)
             close(at: midnight)
-            open(FrontApp(name: current.appName, bundleID: current.bundleID), at: midnight)
+            open(current.frontApp, at: midnight)
         } else if now.timeIntervalSince(lastCheckpoint) >= Self.checkpointInterval {
             var span = current
             span.end = now
@@ -125,11 +153,21 @@ final class ActivityTracker {
         guard let current else { return }
         let now = clock()
         close(at: now)
-        open(FrontApp(name: current.appName, bundleID: current.bundleID), at: now)
+        open(current.frontApp, at: now)
+    }
+
+    /// Records `app` from `date` on, unless it's what's being recorded already
+    /// or it's on the ignore list.
+    private func show(_ app: FrontApp, at date: Date) {
+        let span = AppSpan(app, at: date)
+        let ignored = config.ignores(span)
+        if !ignored, let current, current.isSameApp(as: span) { return }
+        close(at: date)
+        if !ignored { open(app, at: date) }
     }
 
     private func open(_ app: FrontApp, at date: Date) {
-        current = AppSpan(appName: app.name, bundleID: app.bundleID, start: date, end: date)
+        current = AppSpan(app, at: date)
         currentID = UUID()
         lastCheckpoint = date
     }
@@ -141,6 +179,8 @@ final class ActivityTracker {
         record(span, id: currentID)
     }
 
+    // shortcut: rewrites the whole day file for every span, so a window title that changes every
+    // poll costs a full write every 5 s; only start a span once a title lasts ~30 s if that shows up.
     private func record(_ span: AppSpan, id: UUID) {
         let config = config
         for part in span.splitAtMidnight() {
@@ -199,7 +239,6 @@ final class ActivityTracker {
     }
 
     static func systemFrontmostApp() -> FrontApp? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        return FrontApp(name: app.localizedName ?? app.bundleIdentifier ?? "Unknown", bundleID: app.bundleIdentifier)
+        NSWorkspace.shared.frontmostApplication.map(FrontApp.init)
     }
 }
