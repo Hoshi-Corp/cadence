@@ -68,6 +68,8 @@ enum ActivitySegmenter {
         merged.add(picked.dropFirst().flatMap(\.spans))
         merged.task = picked.lazy.compactMap(\.task).first
         merged.isExcluded = picked.allSatisfy(\.isExcluded)
+        // Kept private if any part was, so merging never reveals it.
+        merged.isPrivate = picked.contains(where: \.isPrivate)
         merged.isEdited = true
         var result = segments
         result.replaceSubrange(indices.first!...indices.last!, with: [merged])
@@ -128,6 +130,17 @@ enum ActivitySegmenter {
             guard ids.contains(segment.id) else { return segment }
             var changed = segment
             changed.isExcluded = excluded
+            changed.isEdited = true
+            return changed
+        }
+    }
+
+    static func settingPrivate(_ isPrivate: Bool, for ids: Set<UUID>, in segments: [ActivitySegment])
+        -> [ActivitySegment] {
+        segments.map { segment in
+            guard ids.contains(segment.id) else { return segment }
+            var changed = segment
+            changed.isPrivate = isPrivate
             changed.isEdited = true
             return changed
         }

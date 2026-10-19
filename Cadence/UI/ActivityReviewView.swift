@@ -91,7 +91,7 @@ struct ActivityReviewView: View {
                     "No activity",
                     systemImage: "chart.bar.xaxis",
                     description: Text(isToday
-                        ? "Cadence is recording which app is in front. It shows up here as you work."
+                        ? "Cadence is recording what's in front. It shows up here as you work."
                         : "Nothing was recorded on this day.")
                 )
                 .frame(maxHeight: .infinity)
@@ -149,7 +149,7 @@ struct ActivityReviewView: View {
                     .foregroundStyle(.secondary)
                     .help(app.activity.current == nil
                           ? "Not recording while you're away or the Mac is asleep"
-                          : "Recording the app in front")
+                          : "Recording what's in front")
             }
         }
         .buttonStyle(.borderless)
@@ -178,6 +178,9 @@ struct ActivityReviewView: View {
             Button(excludeTitle(for: selection)) { toggleExcluded(selection) }
                 .disabled(selection.isEmpty)
                 .help("Leave segments out of the work log")
+            Button(privateTitle(for: selection)) { togglePrivate(selection) }
+                .disabled(selection.isEmpty)
+                .help("Write segments to the work log as “Private”, with their times only")
             Spacer()
             Button("Write to Log") { writeToLog() }
                 .disabled(segments.isEmpty)
@@ -199,6 +202,7 @@ struct ActivityReviewView: View {
         }
         if !picked.isEmpty {
             Button(excludeTitle(for: ids)) { toggleExcluded(ids) }
+            Button(privateTitle(for: ids)) { togglePrivate(ids) }
         }
         if picked.count == 1, let app = picked[0].usage.first?.name {
             Divider()
@@ -206,6 +210,7 @@ struct ActivityReviewView: View {
                 let title = picked[0].title(rules: rules)
                 newRule = ActivityRule(field: .app, pattern: app, task: title == app ? "" : title)
             }
+            Button("Stop Recording \(app)") { ignore(app, in: picked[0]) }
         }
     }
 
@@ -217,6 +222,26 @@ struct ActivityReviewView: View {
     private func excludeTitle(for ids: Set<ActivitySegment.ID>) -> String {
         let picked = segments.filter { ids.contains($0.id) }
         return !picked.isEmpty && picked.allSatisfy(\.isExcluded) ? "Include" : "Exclude"
+    }
+
+    private func privateTitle(for ids: Set<ActivitySegment.ID>) -> String {
+        let picked = segments.filter { ids.contains($0.id) }
+        return !picked.isEmpty && picked.allSatisfy(\.isPrivate) ? "Not Private" : "Private"
+    }
+
+    private func togglePrivate(_ ids: Set<ActivitySegment.ID>) {
+        let makePrivate = privateTitle(for: ids) == "Private"
+        edit { ActivitySegmenter.settingPrivate(makePrivate, for: ids, in: $0) }
+    }
+
+    /// Adds the app to the ignore list. What's recorded already stays, to be excluded by hand.
+    private func ignore(_ appName: String, in segment: ActivitySegment) {
+        // The bundle ID, since a name like "Code" would also match "Xcode".
+        let pattern = segment.spans.first { $0.appName == appName }?.bundleID ?? appName
+        if !app.preferences.value.activity.ignored.contains(where: { $0.field == .app && $0.pattern == pattern }) {
+            app.preferences.value.activity.ignored.append(ActivityIgnore(field: .app, pattern: pattern))
+        }
+        message = "\(appName) won't be recorded from now on. To undo it, see the ignore list in Settings → Activity."
     }
 
     private func merge(_ ids: Set<ActivitySegment.ID>) {
@@ -267,6 +292,10 @@ private struct ActivitySegmentRow: View {
         segment.usage.prefix(4).map { "\($0.name) \(DayStats.duration($0.seconds))" }.joined(separator: ", ")
     }
 
+    private var windows: String {
+        segment.windowTitles.filter { $0.seconds >= 30 }.prefix(3).map(\.name).joined(separator: " · ")
+    }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("\(LogEntry.time(segment.start))–\(isLive ? "now" : LogEntry.time(segment.end))")
@@ -282,11 +311,27 @@ private struct ActivitySegmentRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if segment.isPrivate {
+                        Label("private", systemImage: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .help("Written to the log as “\(ActivityLog.privateTitle)”, with its times only")
+                    }
                 }
                 Text(apps)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if !windows.isEmpty {
+                    Text(windows)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(segment.windowTitles.prefix(8).map {
+                            "\($0.name)  \(DayStats.duration($0.seconds))"
+                        }.joined(separator: "\n"))
+                }
             }
             Spacer()
             Text(DayStats.duration(segment.duration))
@@ -425,18 +470,31 @@ struct ActivityRuleFields: View {
 
     var body: some View {
         HStack {
-            Picker("Match", selection: $rule.field) {
-                ForEach(ActivityRule.Field.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            TextField("contains", text: $rule.pattern, prompt: Text(rule.field == .app ? "Xcode" : "Pull request"))
-                .labelsHidden()
+            ActivityMatchFields(field: $rule.field, pattern: $rule.pattern)
             Image(systemName: "arrow.right")
                 .foregroundStyle(.secondary)
             TextField("Task", text: $rule.task, prompt: Text("Task"))
                 .labelsHidden()
+                .textFieldStyle(.roundedBorder)
         }
-        .textFieldStyle(.roundedBorder)
+    }
+}
+
+/// "App contains …" fields, shared by rules and the ignore list.
+struct ActivityMatchFields: View {
+    @Binding var field: ActivityRule.Field
+    @Binding var pattern: String
+
+    var body: some View {
+        HStack {
+            Picker("Match", selection: $field) {
+                ForEach(ActivityRule.Field.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            TextField("contains", text: $pattern, prompt: Text(field.example))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+        }
     }
 }

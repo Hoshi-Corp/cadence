@@ -107,19 +107,27 @@ Cadence runs in the menu bar only (no Dock icon). It does four things:
 - Uses the system idle time, so no permission is needed.
 
 ### Activity tracking
-- **Off until you turn it on** (Settings → Activity). Level 1 records which app is in
-  front and for how long. It needs no permission.
+- **Off until you turn it on** (Settings → Activity), one [level](#activity-tracking-levels)
+  at a time. Level 1 records which app is in front and for how long, and needs no
+  permission. Level 2 adds the window title (Accessibility permission). Level 3 adds the
+  browser tab's title and address in Safari, Chrome, Arc, Brave, Edge and Vivaldi
+  (Automation permission, which macOS asks for once per browser). Once Cadence can read a
+  Chrome-based browser's tabs, its incognito windows aren't recorded; without that, their
+  window titles are.
 - Recording pauses while you're away, while the Mac sleeps and while another user's
   session is in front. Switching to Cadence itself isn't recorded.
+- **Ignore list**: nothing is recorded while a matching app, window title or address is in
+  front, e.g. *App contains "1Password"*. Right-click a segment to stop recording its app.
 - **Segments**: time is grouped into segments by app. Switches shorter than 5 minutes
   (configurable) are folded into the activity around them, so a quick look at Slack
   doesn't break up an hour in Xcode.
 - **Rules** name activity after a task, e.g. *App contains "Xcode" → Cadence*. Activity
   with the same task joins into one segment, even across apps. Rules can also match window
-  titles, which are recorded from level 2 (see the [roadmap](#roadmap)).
-- **Activity window**: review a day's segments, then **rename**, **merge** neighbours,
-  **split** one at a time, or **exclude** it from the log. Right-click a segment to add a
-  rule for its app.
+  titles (level 2) and addresses, e.g. *URL contains "github.com/acme"* (level 3).
+- **Activity window**: review a day's segments, with their main window titles, then
+  **rename**, **merge** neighbours, **split** one at a time, **exclude** it from the log,
+  or make it **private**: it's written as `🔒 Private` with its times only. Right-click a
+  segment to add a rule for its app.
 - **Write to Log** puts the reviewed segments in an **Activity** section of the day's
   file. Nothing is written until you click it, and writing again replaces the section.
 
@@ -208,7 +216,8 @@ folders for now. To give both Macs the same reminders and timer settings, use
 Settings (⚙ in the popover) has five tabs: **General** (launch at login, active hours,
 holding reminders during focus, away detection, settings export and import),
 **Pomodoro**, **Reminders** (edit, add and delete reminders), **Work Log** (folder,
-quick log shortcut) and **Activity** (tracking, short-switch folding, rules).
+quick log shortcut) and **Activity** (tracking levels, short-switch folding, rules, ignore
+list).
 
 ## Work log format
 
@@ -292,13 +301,14 @@ point it at.
 | **v0.1** | ✅ Released | Menu bar app, Pomodoro timer, three wellness reminders held during focus, quick log, daily Markdown file with marker-based sections, folder picker, launch at login |
 | **v0.2** | ✅ Released | Custom reminders (interval, fixed time, one-off), global hotkey for quick log, **Today** view to edit and delete entries, idle detection (resets reminders after you've been away), export and import of settings |
 | **v0.3** | ✅ Released | Automatic activity tracking, level 1 (frontmost app, no permission needed), merging of activity into segments, **Activity Review** window to rename, merge, split or exclude segments, rules that map apps or window titles to tasks |
-| **v0.4** | ⏳ Next | Activity tracking levels 2–3 (window titles via Accessibility, browser tabs via Automation), private segments, ignore list |
+| **v0.4** | 🚧 In progress | Activity tracking levels 2–3 (window titles via Accessibility, browser tabs via Automation), private segments, ignore list |
 | **v0.5** | Planned | Obsidian options (YAML front matter / Properties, `[[project]]` links, "Open in Obsidian"), end-of-day summary prompt, machine name in filenames for shared folders |
 | **v1.0** | Planned | Polish, onboarding, sounds, optional Developer ID signing and a notarized DMG, auto-update |
 | Later | Ideas | Weekly and monthly roll-ups, Shortcuts / AppleScript actions, calendar-aware reminders (held during meetings), focus modes during Pomodoros |
 | Later | Ideas | **iPhone and Apple Watch apps** that work seamlessly with the Mac: start, pause or skip a Pomodoro from any device and see the same countdown everywhere, get reminders on the wrist when away from the desk and mark them done there, and add quick log entries from the phone or watch. Needs sync between devices (e.g. iCloud), which changes the current "no network requests" design, so it would be opt-in |
+| Later | Ideas | **Windows version**: the same Pomodoro timer, reminders, quick log and activity tracking from the system tray, writing the same daily Markdown files so a log folder can be shared between a Mac and a PC. The app is built with Swift, SwiftUI and AppKit, so this would be a separate native app (e.g. C# / WinUI) sharing the log format |
 
-### Activity tracking levels (v0.3+)
+### Activity tracking levels
 
 | Level | Captures | Permission |
 |---|---|---|
@@ -306,7 +316,10 @@ point it at.
 | 2 | Window titles | Accessibility |
 | 3 | Browser tab title and URL | Automation (per browser) |
 
-Every level is opt-in. You can edit any recorded activity before it's written to the log.
+Every level is opt-in, and each one needs the one before it. Without the permission, Cadence
+falls back to the level below. You can edit any recorded activity before it's written to
+the log. Window titles and addresses stay on this Mac: the log shows each segment's name
+and apps, not its titles.
 
 ## Development
 
@@ -350,12 +363,12 @@ docs/           README images
 
 ### Signing
 
-Builds are **ad-hoc signed** by default, which needs no Apple account. That's enough while
-Cadence only asks for notification permission, which is the case up to v0.3: activity
-tracking level 1 needs no permission.
+Builds are **ad-hoc signed** by default, which needs no Apple account. That's enough for
+notifications and activity tracking level 1, which need no other permission.
 
-Window titles (activity tracking level 2, v0.4) need the Accessibility permission, and
-macOS ties that permission to the code signature. With ad-hoc signing you would have to
+Window titles (activity tracking level 2) need the Accessibility permission, and macOS
+ties that permission to the code signature, as it does Automation for browser tabs
+(level 3). With ad-hoc signing you would have to
 grant it again after every rebuild. To avoid that, set up a stable identity on each Mac:
 
 1. Xcode → Settings → Accounts → add your Apple ID (a free account works). Xcode creates
